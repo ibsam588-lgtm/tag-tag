@@ -1,6 +1,14 @@
 node_modules/
 dist/
 .vite/
+android/.gradle/
+android/app/build/
+android/build/
+android/captures/
+android/keystore.properties
+android/local.properties
+*.jks
+*.keystore
 *.local
 .DS_Store
 Thumbs.db

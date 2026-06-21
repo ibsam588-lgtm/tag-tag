@@ -1,0 +1,19 @@
+{
+  "name": "Tag Tag: Playground Blitz",
+  "short_name": "Tag Tag",
+  "description": "A fast playground tag game with dashes, fake-outs, Bell Zones, shrinking yards, and Frenzy Mode.",
+  "start_url": "./",
+  "display": "fullscreen",
+  "background_color": "#36d6ff",
+  "theme_color": "#ff3f68",
+  "orientation": "landscape",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
