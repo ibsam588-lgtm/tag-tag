@@ -18,7 +18,9 @@ android/app/build/
 android/build/
 android/captures/
 android/keystore.properties
+android/app/upload-keystore.jks
 android/local.properties
+google-play-service-account.json
 *.jks
 *.keystore
 *.local

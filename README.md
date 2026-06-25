@@ -7,7 +7,7 @@ Flutter Android arcade tag game set in a top-down playground arena.
 - Play Store name: **Tag Tag: Playground Blitz**
 - Launcher name: **Tag Tag**
 - Android package: `com.tagtag.playgroundblitz`
-- Privacy policy: `https://ibsam588-lgtm.github.io/tag-tag/privacy.html`
+- Privacy policy: `https://corsairlabs.com/tag-tag-playground-blitz-privacy-policy`
 
 ## Game Rules
 
@@ -50,11 +50,23 @@ flutter build appbundle --release
 
 For Play Store upload signing, copy `android/keystore.properties.example` to `android/keystore.properties` and point it to your private upload key. Do not commit keystores or `keystore.properties`.
 
+## AdMob Test IDs
+
+Internal builds must use Google's AdMob demo IDs, not real production IDs:
+
+- Android app ID: `ca-app-pub-3940256099942544~3347511713`
+- Interstitial: `ca-app-pub-3940256099942544/1033173712`
+- Rewarded: `ca-app-pub-3940256099942544/5224354917`
+- Banner: `ca-app-pub-3940256099942544/9214589741`
+
+The full set of Android demo IDs is kept in `lib/admob_test_ids.dart`.
+
 ## GitHub Actions
 
 - `.github/workflows/android.yml` runs Flutter analyze, tests, and release APK/AAB builds.
+- `.github/workflows/play-internal.yml` builds a signed Android App Bundle and uploads it to Google Play internal testing when the Play Console app and repository secrets are configured.
 - `.github/workflows/deploy.yml` publishes `site/privacy.html` to GitHub Pages for the Play Store privacy policy URL.
 
 ## Play Store Prep
 
-Play Store copy and release notes live in `play-store/`. Fastlane-compatible listing text lives in `fastlane/metadata/android/en-US/`.
+Play Store copy, form answers, and release steps live in `play-store/`. Fastlane-compatible listing text and changelogs live in `fastlane/metadata/android/en-US/`.

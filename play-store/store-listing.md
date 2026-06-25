@@ -30,13 +30,17 @@ Can you score the most points before the bell rings?
 
 Games / Arcade
 
+## Public Contact Email
+
+labscorsair@gmail.com
+
 ## Tags
 
 Arcade, Casual, Action, Offline, Single player
 
 ## Privacy Policy URL
 
-https://ibsam588-lgtm.github.io/tag-tag/privacy.html
+https://corsairlabs.com/tag-tag-playground-blitz-privacy-policy
 
 ## Search Phrases To Use Naturally
 

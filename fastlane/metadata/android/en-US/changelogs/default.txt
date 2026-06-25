@@ -1,0 +1,5 @@
+Initial internal test build for Tag Tag: Playground Blitz.
+
+- Adds the arcade playground home screen.
+- Adds Bell Zone, Shrinking Yard, Stamina Chase, and Tag Frenzy modes.
+- Adds stamina, dash, catch-up, score, tutorial, store, setup, avatar, and mission screens.
