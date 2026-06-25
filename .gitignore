@@ -1,6 +1,16 @@
 node_modules/
 dist/
 .vite/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+.idea/
+build/
+coverage/
+*.iml
+flutter-*.png
 android/.gradle/
 android/app/build/
 android/build/

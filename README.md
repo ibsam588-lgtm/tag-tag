@@ -1,6 +1,6 @@
 # Tag Tag: Playground Blitz
 
-Top-down browser prototype for a playground tag game where the rules force action instead of letting runners kite forever.
+Flutter Android arcade tag game set in a top-down playground arena.
 
 ## App Identity
 
@@ -11,50 +11,49 @@ Top-down browser prototype for a playground tag game where the rules force actio
 
 ## Game Rules
 
-- One player is **It**.
+- One player is **It** at a time.
 - Tagging another player gives points and transfers **It**.
-- Sprinting and dashing drain stamina, so nonstop running becomes slower.
-- Bell Zone events award points only to players who risk entering the highlighted zone.
+- Sprinting is tied to the joystick distance, so nonstop running drains stamina and slows players down.
+- Dash is a timed burst with cooldown and stamina cost.
+- Bell Zone events award points only to players who risk entering the glowing zone.
 - The yard shrinks during the round to push everyone closer.
 - If no tag happens for too long, **It** gets a catch-up boost.
-- The last 15 seconds become Frenzy Mode with faster tags and score multipliers.
+- The final 15 seconds become Frenzy Mode with faster chases and score multipliers.
 
 ## Local Development
 
 ```bash
-npm install
-npm run dev
+flutter pub get
+flutter run -d emulator-5554
 ```
 
-## Build
+## Checks
 
 ```bash
-npm run build
+flutter analyze
+flutter test
 ```
 
-## Android
+## Android Builds
+
+Build a release APK:
 
 ```bash
-npm run android:sync
+flutter build apk --release
 ```
 
-Open the native project with:
+Build a Play Store Android App Bundle:
 
 ```bash
-npm run android:open
-```
-
-Build a release Android App Bundle with:
-
-```bash
-npm run android:bundle
+flutter build appbundle --release
 ```
 
 For Play Store upload signing, copy `android/keystore.properties.example` to `android/keystore.properties` and point it to your private upload key. Do not commit keystores or `keystore.properties`.
 
-## Deploy
+## GitHub Actions
 
-This repo includes a GitHub Pages workflow in `.github/workflows/deploy.yml`. Pushing to `main` builds the app and deploys the `dist` folder through GitHub Pages.
+- `.github/workflows/android.yml` runs Flutter analyze, tests, and release APK/AAB builds.
+- `.github/workflows/deploy.yml` publishes `site/privacy.html` to GitHub Pages for the Play Store privacy policy URL.
 
 ## Play Store Prep
 

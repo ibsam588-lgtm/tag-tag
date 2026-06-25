@@ -1,1 +1,1 @@
-Fast playground tag game with dashes, fake-outs, zones, and frenzy rounds.
+Fast playground tag game with dashes, Bell Zones, and shrinking-yard frenzy.

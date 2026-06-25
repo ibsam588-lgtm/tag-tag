@@ -8,7 +8,7 @@ Current prototype behavior:
 - No cloud saves.
 - No multiplayer server.
 - No personal information is collected by the app.
-- The idea form stores text locally on the device with browser or WebView local storage.
+- Game progress is session-only in the current build.
 
 Suggested Play Console answers for the current build:
 

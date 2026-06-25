@@ -6,18 +6,18 @@ Tag Tag: Playground Blitz
 
 ## Short Description
 
-Fast playground tag game with dashes, fake-outs, zones, and frenzy rounds.
+Fast playground tag game with dashes, Bell Zones, and shrinking-yard frenzy.
 
 ## Full Description
 
 Tag Tag: Playground Blitz is a fast arcade tag game set in a colorful schoolyard arena.
 
-Run from the player who is It, dash around playground obstacles, fake out your rivals, and risk the Bell Zone for extra points. But you cannot run forever. Stamina runs down, the yard shrinks, and Frenzy Mode turns the final seconds into chaos.
+Run from the player who is It, dash around playground obstacles, and risk the Bell Zone for extra points. But you cannot run forever. Stamina runs down, the yard shrinks, and Frenzy Mode turns the final seconds into chaos.
 
 Game Features:
 - Fast top-down playground tag action
 - Stamina system that stops endless running
-- Dash and Fake-Out abilities
+- Dash bursts with stamina and cooldown pressure
 - Bell Zone objectives that force risky plays
 - Shrinking yard boundaries
 - Final Frenzy Mode for exciting round endings

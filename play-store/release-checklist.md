@@ -9,7 +9,7 @@
 - Complete content rating questionnaire.
 - Add app icon, feature graphic, phone screenshots, and tablet screenshots.
 - Create a private upload key and save local signing values in `android/keystore.properties`.
-- Build a signed Android App Bundle (`.aab`) from the Android project with `npm run android:bundle`.
+- Build a signed Android App Bundle (`.aab`) with `flutter build appbundle --release`.
 - Upload the `.aab` to internal testing first.
 - Test install, launch, controls, rotation, audio, and offline behavior.
 - Promote to closed/open testing or production after review.
