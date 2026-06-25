@@ -1,14 +1,28 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 import 'game_simulation.dart';
 
+enum ArenaBackground { base, bellZone, shrinkingYard, frenzy }
+
+enum PlayerAvatar { blue, red, yellow, green, pink, purple }
+
 class PlaygroundPainter extends CustomPainter {
-  PlaygroundPainter({required this.simulation, required this.animationTime});
+  PlaygroundPainter({
+    required this.simulation,
+    required this.animationTime,
+    this.backgrounds = const {},
+    this.avatars = const {},
+    this.humanAvatar = PlayerAvatar.blue,
+  });
 
   final PlaygroundBlitzSimulation simulation;
   final double animationTime;
+  final Map<ArenaBackground, ui.Image> backgrounds;
+  final Map<PlayerAvatar, ui.Image> avatars;
+  final PlayerAvatar humanAvatar;
 
   static const _ink = Color(0xff111820);
   static const _asphalt = Color(0xff756f64);
@@ -54,6 +68,19 @@ class PlaygroundPainter extends CustomPainter {
   }
 
   void _drawWorld(Canvas canvas) {
+    final approvedBackground = backgrounds[_activeBackground];
+    if (approvedBackground != null) {
+      _drawApprovedBackground(canvas, approvedBackground);
+      _drawYardPressure(canvas);
+      _drawBellZone(canvas);
+      _drawDecoys(canvas);
+      _drawTagRing(canvas);
+      _drawPlayers(canvas);
+      _drawFloatingTexts(canvas);
+      _drawWorldVignette(canvas);
+      return;
+    }
+
     final world = Offset.zero & PlaygroundBlitzSimulation.worldSize;
     canvas.drawRect(
       world,
@@ -79,6 +106,34 @@ class PlaygroundPainter extends CustomPainter {
     _drawPlayers(canvas);
     _drawFloatingTexts(canvas);
     _drawWorldVignette(canvas);
+  }
+
+  ArenaBackground get _activeBackground {
+    if (simulation.frenzy) {
+      return ArenaBackground.frenzy;
+    }
+    if (simulation.shrinkProgress > 0.42) {
+      return ArenaBackground.shrinkingYard;
+    }
+    if (simulation.bellZone.active) {
+      return ArenaBackground.bellZone;
+    }
+    return ArenaBackground.base;
+  }
+
+  void _drawApprovedBackground(Canvas canvas, ui.Image image) {
+    final imageSize = Size(image.width.toDouble(), image.height.toDouble());
+    const worldSize = PlaygroundBlitzSimulation.worldSize;
+    final fitted = applyBoxFit(BoxFit.cover, imageSize, worldSize);
+    final source = Alignment.center.inscribe(
+      fitted.source,
+      Offset.zero & imageSize,
+    );
+    final destination = Alignment.center.inscribe(
+      fitted.destination,
+      Offset.zero & worldSize,
+    );
+    canvas.drawImageRect(image, source, destination, Paint());
   }
 
   void _drawArena(Canvas canvas) {
@@ -441,26 +496,33 @@ class PlaygroundPainter extends CustomPainter {
         ? const Color(0xff39caff)
         : _yellow;
     final paint = Paint()
-      ..strokeWidth = player.dashTimer > 0 ? 6 : 3
+      ..strokeWidth = player.dashTimer > 0 ? 8 : 5
       ..strokeCap = StrokeCap.round
       ..color = trailColor.withValues(
-        alpha: player.dashTimer > 0 ? 0.65 : 0.36,
+        alpha: player.dashTimer > 0 ? 0.62 : 0.28,
       );
     for (var i = 0; i < 3; i += 1) {
-      final side = Offset(-direction.dy, direction.dx) * (i - 1) * 5.0;
+      final side = Offset(-direction.dy, direction.dx) * (i - 1) * 7.0;
       canvas.drawLine(
-        player.position - direction * (22 + i * 9.0) + side,
-        player.position - direction * (46 + i * 10.0) + side,
+        player.position - direction * (28 + i * 10.0) + side,
+        player.position - direction * (55 + i * 12.0) + side,
         paint,
       );
     }
   }
 
   void _drawRunner(Canvas canvas, PlayerState player) {
+    final approvedAvatar = avatars[_avatarFor(player)];
+    if (approvedAvatar != null) {
+      _drawApprovedAvatarRunner(canvas, player, approvedAvatar);
+      return;
+    }
+
     final speed = player.velocity.distance;
     final angle = speed > 8
         ? math.atan2(player.velocity.dy, player.velocity.dx)
         : -math.pi / 2;
+    final facingRight = math.cos(angle) >= 0;
     final bodyColor = player.isIt ? _red : player.color;
     final skin = const Color(0xffffbd82);
     final phase = math.sin(animationTime * (speed > 20 ? 14 : 6));
@@ -468,71 +530,214 @@ class PlaygroundPainter extends CustomPainter {
     if (player.isIt || player.safety > 0 || player.fakeOutTimer > 0) {
       canvas.drawCircle(
         player.position,
-        player.isIt ? 31 + math.sin(animationTime * 9) * 2 : 24,
+        player.isIt ? 40 + math.sin(animationTime * 9) * 2 : 31,
         Paint()
           ..color = (player.isIt ? _red : Colors.white).withValues(
-            alpha: player.isIt ? 0.26 : 0.15,
+            alpha: player.isIt ? 0.24 : 0.16,
           ),
       );
     }
 
     canvas.save();
     canvas.translate(player.position.dx, player.position.dy);
-    canvas.rotate(angle);
+    canvas.scale(facingRight ? 1.22 : -1.22, 1.22);
     canvas.drawOval(
-      const Rect.fromLTWH(-20, -12, 42, 26).shift(const Offset(4, 12)),
-      Paint()..color = Colors.black.withValues(alpha: 0.24),
+      Rect.fromCenter(
+        center: const Offset(0, 22),
+        width: player.isIt ? 58 : 52,
+        height: 24,
+      ),
+      Paint()..color = Colors.black.withValues(alpha: 0.25),
     );
 
-    final limbPaint = Paint()
-      ..strokeWidth = 6
+    final pantsPaint = Paint()
+      ..strokeWidth = 9
       ..strokeCap = StrokeCap.round
       ..color = const Color(0xff242938);
-    canvas.drawLine(
-      Offset(-8, -7 + phase * 2),
-      Offset(-24, -16 - phase * 5),
-      limbPaint,
-    );
-    canvas.drawLine(
-      Offset(-8, 7 - phase * 2),
-      Offset(-24, 16 + phase * 5),
-      limbPaint,
-    );
-    canvas.drawLine(Offset(1, -10), Offset(-13, -22 + phase * 4), limbPaint);
-    canvas.drawLine(Offset(2, 10), Offset(-12, 22 - phase * 4), limbPaint);
+    final armPaint = Paint()
+      ..strokeWidth = 7
+      ..strokeCap = StrokeCap.round
+      ..color = skin;
+    final shoePaint = Paint()..color = Colors.white;
+    final shoeOutline = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = _ink.withValues(alpha: 0.58);
 
+    final backFoot = Offset(-17, 27 + phase * 3);
+    final frontFoot = Offset(17, 26 - phase * 3);
+    canvas.drawLine(Offset(-7, 8 + phase * 1.5), backFoot, pantsPaint);
+    canvas.drawLine(Offset(8, 8 - phase * 1.5), frontFoot, pantsPaint);
+    _drawRunnerShoe(canvas, backFoot, -0.08, shoePaint, shoeOutline);
+    _drawRunnerShoe(canvas, frontFoot, 0.08, shoePaint, shoeOutline);
+
+    final backHand = Offset(-24, -1 + phase * 2);
+    final frontHand = Offset(23, 1 - phase * 2);
+    canvas.drawLine(const Offset(-9, -4), backHand, armPaint);
+    canvas.drawLine(const Offset(10, -3), frontHand, armPaint);
+    canvas.drawCircle(backHand, 4, Paint()..color = skin);
+    canvas.drawCircle(frontHand, 4, Paint()..color = skin);
+
+    final shirt = RRect.fromRectAndRadius(
+      const Rect.fromLTWH(-17, -8, 35, 31),
+      const Radius.circular(12),
+    );
     canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        const Rect.fromLTWH(-13, -13, 27, 26),
-        const Radius.circular(9),
-      ),
+      shirt,
       Paint()
         ..color = bodyColor.withValues(alpha: player.stamina < 14 ? 0.7 : 1),
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        const Rect.fromLTWH(-13, -13, 27, 26),
-        const Radius.circular(9),
+        const Rect.fromLTWH(-13, -5, 16, 23),
+        const Radius.circular(8),
       ),
+      Paint()..color = Colors.white.withValues(alpha: 0.22),
+    );
+    canvas.drawRRect(
+      shirt,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = player.isHuman ? 3 : 2
+        ..strokeWidth = player.isHuman ? 3.2 : 2.2
         ..color = Colors.white.withValues(alpha: player.isHuman ? 0.9 : 0.38),
     );
 
-    canvas.drawCircle(const Offset(12, 0), 11, Paint()..color = skin);
+    canvas.drawCircle(const Offset(3, -21), 15, Paint()..color = skin);
     canvas.drawArc(
-      const Rect.fromLTWH(2, -11, 20, 18),
-      math.pi,
-      math.pi,
+      const Rect.fromLTWH(-13, -36, 32, 26),
+      math.pi * 0.86,
+      math.pi * 1.25,
       false,
       Paint()
-        ..strokeWidth = 8
+        ..strokeWidth = 10
         ..strokeCap = StrokeCap.round
         ..color = _hairColor(player),
     );
-    canvas.drawCircle(const Offset(16, -3), 1.7, Paint()..color = _ink);
-    canvas.drawCircle(const Offset(16, 4), 1.7, Paint()..color = _ink);
+    canvas.drawCircle(const Offset(8, -23), 2, Paint()..color = _ink);
+    canvas.drawCircle(const Offset(8, -16), 2, Paint()..color = _ink);
+    canvas.drawArc(
+      const Rect.fromLTWH(5, -18, 8, 8),
+      0.2,
+      math.pi * 0.55,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.8
+        ..strokeCap = StrokeCap.round
+        ..color = _ink.withValues(alpha: 0.55),
+    );
+    canvas.restore();
+  }
+
+  void _drawApprovedAvatarRunner(
+    Canvas canvas,
+    PlayerState player,
+    ui.Image avatar,
+  ) {
+    final speed = player.velocity.distance;
+    final angle = speed > 8
+        ? math.atan2(player.velocity.dy, player.velocity.dx)
+        : -math.pi / 2;
+    final facingRight = math.cos(angle) >= 0;
+
+    if (player.isIt || player.safety > 0 || player.fakeOutTimer > 0) {
+      canvas.drawCircle(
+        player.position.translate(0, -10),
+        player.isIt ? 48 + math.sin(animationTime * 9) * 2 : 38,
+        Paint()
+          ..color = (player.isIt ? _red : Colors.white).withValues(
+            alpha: player.isIt ? 0.24 : 0.14,
+          ),
+      );
+    }
+
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: player.position.translate(3, 28),
+        width: player.isIt ? 70 : 62,
+        height: 24,
+      ),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.28)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    );
+
+    final spriteSize = player.isIt ? 124.0 : 112.0;
+    final center = player.position.translate(0, -10);
+    final source = Rect.fromLTWH(
+      0,
+      0,
+      avatar.width.toDouble(),
+      avatar.height.toDouble(),
+    );
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    if (!facingRight) {
+      canvas.scale(-1, 1);
+    }
+    canvas.drawImageRect(
+      avatar,
+      source,
+      Rect.fromCenter(
+        center: Offset.zero,
+        width: spriteSize,
+        height: spriteSize,
+      ),
+      Paint()..filterQuality = FilterQuality.high,
+    );
+    canvas.restore();
+  }
+
+  PlayerAvatar _avatarFor(PlayerState player) {
+    if (player.isIt) {
+      return PlayerAvatar.red;
+    }
+    if (player.isHuman) {
+      return humanAvatar;
+    }
+    switch (player.id) {
+      case 'bot-0':
+        return PlayerAvatar.yellow;
+      case 'bot-1':
+        return PlayerAvatar.green;
+      case 'bot-2':
+        return PlayerAvatar.pink;
+      case 'bot-3':
+        return PlayerAvatar.purple;
+      case 'bot-4':
+        return PlayerAvatar.purple;
+      case 'bot-5':
+        return PlayerAvatar.yellow;
+      default:
+        return PlayerAvatar.green;
+    }
+  }
+
+  void _drawRunnerShoe(
+    Canvas canvas,
+    Offset center,
+    double tilt,
+    Paint fill,
+    Paint outline,
+  ) {
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(tilt);
+    final shoe = RRect.fromRectAndRadius(
+      const Rect.fromLTWH(-8, -5, 18, 10),
+      const Radius.circular(5),
+    );
+    canvas.drawRRect(shoe, fill);
+    canvas.drawRRect(shoe, outline);
+    canvas.drawLine(
+      const Offset(-1, -3),
+      const Offset(6, -3),
+      Paint()
+        ..strokeWidth = 1.4
+        ..strokeCap = StrokeCap.round
+        ..color = const Color(0xff77a6d9),
+    );
     canvas.restore();
   }
 
@@ -552,11 +757,11 @@ class PlaygroundPainter extends CustomPainter {
         : player.isHuman
         ? const Color(0xff37caff)
         : _yellow;
-    final top = player.position.translate(0, -44);
+    final top = player.position.translate(0, -54);
     final path = Path()
       ..moveTo(top.dx, top.dy + math.sin(animationTime * 6) * 2)
-      ..lineTo(top.dx - 9, top.dy - 16)
-      ..lineTo(top.dx + 9, top.dy - 16)
+      ..lineTo(top.dx - 10, top.dy - 18)
+      ..lineTo(top.dx + 10, top.dy - 18)
       ..close();
     canvas.drawPath(
       path.shift(const Offset(1, 3)),
