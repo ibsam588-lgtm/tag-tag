@@ -3,17 +3,19 @@ default_platform(:android)
 platform :android do
   desc "Upload the signed Android App Bundle to Google Play internal testing"
   lane :internal do
+    repo_root = File.expand_path("..", __dir__)
     package_name = ENV.fetch("GOOGLE_PLAY_PACKAGE_NAME", "com.tagtag.playgroundblitz")
     track = ENV.fetch("GOOGLE_PLAY_TRACK", "internal")
     release_status = ENV.fetch("GOOGLE_PLAY_RELEASE_STATUS", "completed")
-    aab_path = ENV.fetch(
-      "ANDROID_AAB_PATH",
-      "build/app/outputs/bundle/release/app-release.aab"
+    aab_path = File.expand_path(
+      ENV.fetch("ANDROID_AAB_PATH", "build/app/outputs/bundle/release/app-release.aab"),
+      repo_root
     )
-    json_key = ENV.fetch(
-      "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH",
-      "google-play-service-account.json"
+    json_key = File.expand_path(
+      ENV.fetch("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_PATH", "google-play-service-account.json"),
+      repo_root
     )
+    metadata_path = File.join(repo_root, "fastlane", "metadata", "android")
 
     UI.user_error!("Missing Android App Bundle at #{aab_path}") unless File.exist?(aab_path)
     UI.user_error!("Missing Google Play service account JSON at #{json_key}") unless File.exist?(json_key)
@@ -24,7 +26,7 @@ platform :android do
       release_status: release_status,
       aab: aab_path,
       json_key: json_key,
-      metadata_path: "fastlane/metadata/android",
+      metadata_path: metadata_path,
       skip_upload_apk: true,
       skip_upload_images: true,
       skip_upload_screenshots: true,
