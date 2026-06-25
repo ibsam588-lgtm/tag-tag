@@ -1,11 +1,69 @@
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'game_painter.dart';
 import 'game_simulation.dart';
+
+enum _ShellScreen { home, game, setup, store }
+
+class _StoreSkin {
+  const _StoreSkin({
+    required this.avatar,
+    required this.name,
+    required this.price,
+    required this.color,
+  });
+
+  final PlayerAvatar avatar;
+  final String name;
+  final int price;
+  final Color color;
+}
+
+const _storeSkins = [
+  _StoreSkin(
+    avatar: PlayerAvatar.blue,
+    name: 'Blue Blitz',
+    price: 0,
+    color: Color(0xff36d6ff),
+  ),
+  _StoreSkin(
+    avatar: PlayerAvatar.red,
+    name: 'Tag Spark',
+    price: 150,
+    color: Color(0xffff405f),
+  ),
+  _StoreSkin(
+    avatar: PlayerAvatar.yellow,
+    name: 'Bell Bolt',
+    price: 120,
+    color: Color(0xffffd64c),
+  ),
+  _StoreSkin(
+    avatar: PlayerAvatar.green,
+    name: 'Yard Dash',
+    price: 120,
+    color: Color(0xff6ee75f),
+  ),
+  _StoreSkin(
+    avatar: PlayerAvatar.pink,
+    name: 'Hop Star',
+    price: 180,
+    color: Color(0xffff6da7),
+  ),
+  _StoreSkin(
+    avatar: PlayerAvatar.purple,
+    name: 'Frenzy Pop',
+    price: 200,
+    color: Color(0xff9d55ff),
+  ),
+];
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,8 +119,15 @@ class _GameShellState extends State<GameShell>
     difficulty: Difficulty.balanced,
   );
   late PlaygroundBlitzSimulation _simulation;
+  final Map<ArenaBackground, ui.Image> _arenaBackgrounds = {};
+  final Map<PlayerAvatar, ui.Image> _avatarSprites = {};
+  _ShellScreen _screen = _ShellScreen.home;
+  int _coins = 150;
+  int _lastReward = 0;
+  bool _roundRewardGranted = false;
+  PlayerAvatar _selectedAvatar = PlayerAvatar.blue;
+  Set<PlayerAvatar> _unlockedAvatars = {PlayerAvatar.blue};
   Offset _stickOffset = Offset.zero;
-  bool _menuOpen = false;
   double _animationSeconds = 0;
 
   @override
@@ -70,14 +135,116 @@ class _GameShellState extends State<GameShell>
     super.initState();
     _ticker = createTicker(_tick);
     _simulation = PlaygroundBlitzSimulation(_settings);
-    _ticker.start();
+    _loadArenaBackgrounds();
+    _loadProgress();
   }
 
   @override
   void dispose() {
     _ticker.dispose();
     _nameController.dispose();
+    for (final image in _arenaBackgrounds.values) {
+      image.dispose();
+    }
+    for (final image in _avatarSprites.values) {
+      image.dispose();
+    }
     super.dispose();
+  }
+
+  Future<void> _loadArenaBackgrounds() async {
+    const assetPaths = {
+      ArenaBackground.base: 'assets/backgrounds/playground_base.png',
+      ArenaBackground.bellZone: 'assets/backgrounds/playground_bell_zone.png',
+      ArenaBackground.shrinkingYard:
+          'assets/backgrounds/playground_shrinking_yard.png',
+      ArenaBackground.frenzy: 'assets/backgrounds/playground_frenzy.png',
+    };
+    final loaded = <ArenaBackground, ui.Image>{};
+    for (final entry in assetPaths.entries) {
+      final data = await rootBundle.load(entry.value);
+      final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+      final frame = await codec.getNextFrame();
+      loaded[entry.key] = frame.image;
+    }
+    if (!mounted) {
+      for (final image in loaded.values) {
+        image.dispose();
+      }
+      return;
+    }
+    setState(() => _arenaBackgrounds.addAll(loaded));
+    await _loadAvatarSprites();
+  }
+
+  Future<void> _loadAvatarSprites() async {
+    const assetPaths = {
+      PlayerAvatar.blue: 'assets/avatars/avatar_blue.png',
+      PlayerAvatar.red: 'assets/avatars/avatar_red.png',
+      PlayerAvatar.yellow: 'assets/avatars/avatar_yellow.png',
+      PlayerAvatar.green: 'assets/avatars/avatar_green.png',
+      PlayerAvatar.pink: 'assets/avatars/avatar_pink.png',
+      PlayerAvatar.purple: 'assets/avatars/avatar_purple.png',
+    };
+    final loaded = <PlayerAvatar, ui.Image>{};
+    for (final entry in assetPaths.entries) {
+      final data = await rootBundle.load(entry.value);
+      final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+      final frame = await codec.getNextFrame();
+      loaded[entry.key] = frame.image;
+    }
+    if (!mounted) {
+      for (final image in loaded.values) {
+        image.dispose();
+      }
+      return;
+    }
+    setState(() => _avatarSprites.addAll(loaded));
+  }
+
+  Future<void> _loadProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    final selectedName = prefs.getString('selected_avatar');
+    final unlockedNames = prefs.getStringList('unlocked_avatars');
+    final selected = _avatarFromName(selectedName) ?? PlayerAvatar.blue;
+    final unlocked = unlockedNames
+        ?.map(_avatarFromName)
+        .whereType<PlayerAvatar>()
+        .toSet();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _coins = prefs.getInt('coins') ?? 150;
+      _unlockedAvatars = (unlocked == null || unlocked.isEmpty)
+          ? {PlayerAvatar.blue}
+          : {...unlocked, PlayerAvatar.blue};
+      _selectedAvatar = _unlockedAvatars.contains(selected)
+          ? selected
+          : PlayerAvatar.blue;
+    });
+  }
+
+  Future<void> _saveProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('coins', _coins);
+    await prefs.setString('selected_avatar', _selectedAvatar.name);
+    await prefs.setStringList(
+      'unlocked_avatars',
+      _unlockedAvatars.map((avatar) => avatar.name).toList(),
+    );
+  }
+
+  PlayerAvatar? _avatarFromName(String? name) {
+    if (name == null) {
+      return null;
+    }
+    for (final avatar in PlayerAvatar.values) {
+      if (avatar.name == name) {
+        return avatar;
+      }
+    }
+    return null;
   }
 
   void _tick(Duration elapsed) {
@@ -89,15 +256,31 @@ class _GameShellState extends State<GameShell>
 
     final dt =
         (elapsed - previous).inMicroseconds / Duration.microsecondsPerSecond;
-    if (!_menuOpen) {
+    if (_screen == _ShellScreen.game && !_simulation.roundOver) {
       _simulation.update(dt, _input);
     }
     _input.consumePresses();
     _animationSeconds += dt;
+    if (_screen == _ShellScreen.game &&
+        _simulation.roundOver &&
+        !_roundRewardGranted) {
+      _grantRoundReward();
+    }
     setState(() {});
     if (_simulation.roundOver) {
       _ticker.stop();
     }
+  }
+
+  void _grantRoundReward() {
+    final human = _simulation.human;
+    final won = _simulation.winner.id == human.id;
+    final reward =
+        20 + (human.score / 12).floor() + human.tags * 12 + (won ? 40 : 0);
+    _lastReward = reward.clamp(20, 260);
+    _coins += _lastReward;
+    _roundRewardGranted = true;
+    unawaited(_saveProgress());
   }
 
   void _startGame() {
@@ -113,19 +296,60 @@ class _GameShellState extends State<GameShell>
       difficulty: _settings.difficulty,
     );
     _simulation = PlaygroundBlitzSimulation(_settings);
-    _menuOpen = false;
+    _screen = _ShellScreen.game;
     _previousTick = null;
     _animationSeconds = 0;
+    _lastReward = 0;
+    _roundRewardGranted = false;
+    _input.move = Offset.zero;
+    _input.sprint = false;
+    _stickOffset = Offset.zero;
     _ticker.start();
     setState(() {});
   }
 
-  void _returnToMenu() {
+  void _openHome() {
     _ticker.stop();
     _input.move = Offset.zero;
+    _input.sprint = false;
     _stickOffset = Offset.zero;
-    _menuOpen = true;
+    _screen = _ShellScreen.home;
     setState(() {});
+  }
+
+  void _openSetup() {
+    _ticker.stop();
+    _input.move = Offset.zero;
+    _input.sprint = false;
+    _stickOffset = Offset.zero;
+    _screen = _ShellScreen.setup;
+    setState(() {});
+  }
+
+  void _openStore() {
+    _ticker.stop();
+    _input.move = Offset.zero;
+    _input.sprint = false;
+    _stickOffset = Offset.zero;
+    _screen = _ShellScreen.store;
+    setState(() {});
+  }
+
+  void _selectOrBuySkin(_StoreSkin skin) {
+    if (_unlockedAvatars.contains(skin.avatar)) {
+      setState(() => _selectedAvatar = skin.avatar);
+      unawaited(_saveProgress());
+      return;
+    }
+    if (_coins < skin.price) {
+      return;
+    }
+    setState(() {
+      _coins -= skin.price;
+      _unlockedAvatars = {..._unlockedAvatars, skin.avatar};
+      _selectedAvatar = skin.avatar;
+    });
+    unawaited(_saveProgress());
   }
 
   @override
@@ -139,17 +363,15 @@ class _GameShellState extends State<GameShell>
             painter: PlaygroundPainter(
               simulation: _simulation,
               animationTime: _animationSeconds,
+              backgrounds: _arenaBackgrounds,
+              avatars: _avatarSprites,
+              humanAvatar: _selectedAvatar,
             ),
           ),
-          _GameHud(simulation: _simulation),
-          _TopActions(
-            onSetup: () {
-              _ticker.stop();
-              setState(() => _menuOpen = true);
-            },
-            onRestart: _startGame,
-          ),
-          if (!_menuOpen && !_simulation.roundOver)
+          if (_screen == _ShellScreen.game) _GameHud(simulation: _simulation),
+          if (_screen == _ShellScreen.game && !_simulation.roundOver)
+            _TopActions(onSetup: _openSetup, onRestart: _startGame),
+          if (_screen == _ShellScreen.game && !_simulation.roundOver)
             _ControlsOverlay(
               simulation: _simulation,
               stickOffset: _stickOffset,
@@ -157,19 +379,41 @@ class _GameShellState extends State<GameShell>
               onStickReleased: _releaseStick,
               onDash: () => _input.dashPressed = true,
             ),
-          if (_menuOpen)
+          if (_screen == _ShellScreen.home)
+            _HomeOverlay(
+              coins: _coins,
+              selectedAvatar: _selectedAvatar,
+              avatars: _avatarSprites,
+              onPlay: _startGame,
+              onStore: _openStore,
+              onSetup: _openSetup,
+            ),
+          if (_screen == _ShellScreen.setup)
             _SetupMenu(
               settings: _settings,
               nameController: _nameController,
               onSettingsChanged: (settings) =>
                   setState(() => _settings = settings),
               onPlay: _startGame,
+              onBack: _openHome,
             ),
-          if (_simulation.roundOver)
+          if (_screen == _ShellScreen.store)
+            _StoreOverlay(
+              coins: _coins,
+              selectedAvatar: _selectedAvatar,
+              unlockedAvatars: _unlockedAvatars,
+              avatars: _avatarSprites,
+              onSelect: _selectOrBuySkin,
+              onBack: _openHome,
+            ),
+          if (_screen == _ShellScreen.game && _simulation.roundOver)
             _ResultsOverlay(
               simulation: _simulation,
+              coins: _coins,
+              reward: _lastReward,
               onPlayAgain: _startGame,
-              onMenu: _returnToMenu,
+              onStore: _openStore,
+              onHome: _openHome,
             ),
         ],
       ),
@@ -278,12 +522,14 @@ class _SetupMenu extends StatelessWidget {
     required this.nameController,
     required this.onSettingsChanged,
     required this.onPlay,
+    required this.onBack,
   });
 
   final GameSettings settings;
   final TextEditingController nameController;
   final ValueChanged<GameSettings> onSettingsChanged;
   final VoidCallback onPlay;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -385,25 +631,46 @@ class _SetupMenu extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xffff3f68),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xff182035),
+                                side: const BorderSide(
+                                  color: Color(0xff182035),
+                                  width: 2,
+                                ),
+                              ),
+                              onPressed: onBack,
+                              icon: const Icon(Icons.home_rounded),
+                              label: const Text('Home'),
                             ),
                           ),
-                          onPressed: onPlay,
-                          child: const Text(
-                            'Play',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: SizedBox(
+                              height: 48,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xffff3f68),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                onPressed: onPlay,
+                                icon: const Icon(Icons.play_arrow_rounded),
+                                label: const Text(
+                                  'Play',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ],
                   ),
@@ -441,6 +708,429 @@ class _SetupMenu extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
     );
   }
+}
+
+class _HomeOverlay extends StatelessWidget {
+  const _HomeOverlay({
+    required this.coins,
+    required this.selectedAvatar,
+    required this.avatars,
+    required this.onPlay,
+    required this.onStore,
+    required this.onSetup,
+  });
+
+  final int coins;
+  final PlayerAvatar selectedAvatar;
+  final Map<PlayerAvatar, ui.Image> avatars;
+  final VoidCallback onPlay;
+  final VoidCallback onStore;
+  final VoidCallback onSetup;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedSkin = _skinForAvatar(selectedAvatar);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 360,
+              child: _Panel(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _Kicker('Playground Blitz'),
+                    const Text(
+                      'Tag Tag',
+                      style: TextStyle(
+                        color: Color(0xff182035),
+                        fontSize: 54,
+                        height: 0.88,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _CoinStrip(coins: coins),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        _SkinPortrait(
+                          image: avatars[selectedAvatar],
+                          color: selectedSkin.color,
+                          size: 96,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                selectedSkin.name,
+                                style: const TextStyle(
+                                  color: Color(0xff182035),
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              Text(
+                                'Selected runner',
+                                style: TextStyle(
+                                  color: const Color(
+                                    0xff182035,
+                                  ).withValues(alpha: 0.62),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xffff405f),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: onPlay,
+                        icon: const Icon(Icons.play_arrow_rounded, size: 30),
+                        label: const Text(
+                          'Play',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _MenuButton(
+                            icon: Icons.storefront_rounded,
+                            label: 'Store',
+                            onPressed: onStore,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _MenuButton(
+                            icon: Icons.tune_rounded,
+                            label: 'Setup',
+                            onPressed: onSetup,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Spacer(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StoreOverlay extends StatelessWidget {
+  const _StoreOverlay({
+    required this.coins,
+    required this.selectedAvatar,
+    required this.unlockedAvatars,
+    required this.avatars,
+    required this.onSelect,
+    required this.onBack,
+  });
+
+  final int coins;
+  final PlayerAvatar selectedAvatar;
+  final Set<PlayerAvatar> unlockedAvatars;
+  final Map<PlayerAvatar, ui.Image> avatars;
+  final ValueChanged<_StoreSkin> onSelect;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 980),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: _Panel(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Home',
+                        onPressed: onBack,
+                        icon: const Icon(
+                          Icons.arrow_back_rounded,
+                          color: Color(0xff182035),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Expanded(
+                        child: Text(
+                          'Runner Store',
+                          style: TextStyle(
+                            color: Color(0xff182035),
+                            fontSize: 30,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      _CoinStrip(coins: coins),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compact = constraints.maxWidth < 760;
+                      return Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          for (final skin in _storeSkins)
+                            SizedBox(
+                              width: compact
+                                  ? (constraints.maxWidth - 10) / 2
+                                  : (constraints.maxWidth - 30) / 3,
+                              child: _StoreSkinCard(
+                                skin: skin,
+                                image: avatars[skin.avatar],
+                                coins: coins,
+                                selected: selectedAvatar == skin.avatar,
+                                unlocked: unlockedAvatars.contains(skin.avatar),
+                                onTap: () => onSelect(skin),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StoreSkinCard extends StatelessWidget {
+  const _StoreSkinCard({
+    required this.skin,
+    required this.image,
+    required this.coins,
+    required this.selected,
+    required this.unlocked,
+    required this.onTap,
+  });
+
+  final _StoreSkin skin;
+  final ui.Image? image;
+  final int coins;
+  final bool selected;
+  final bool unlocked;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final canBuy = coins >= skin.price;
+    final actionText = selected
+        ? 'Selected'
+        : unlocked
+        ? 'Select'
+        : canBuy
+        ? '${skin.price}'
+        : '${skin.price}';
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: selected ? null : onTap,
+        child: Container(
+          height: 172,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: selected
+                ? skin.color.withValues(alpha: 0.24)
+                : const Color(0xff182035).withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected
+                  ? skin.color
+                  : const Color(0xff182035).withValues(alpha: 0.18),
+              width: selected ? 3 : 2,
+            ),
+          ),
+          child: Column(
+            children: [
+              _SkinPortrait(image: image, color: skin.color, size: 82),
+              const SizedBox(height: 6),
+              Text(
+                skin.name,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xff182035),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                height: 30,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? const Color(0xff182035)
+                      : unlocked || canBuy
+                      ? skin.color
+                      : const Color(0xff68717b),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (!unlocked) ...[
+                      const Icon(
+                        Icons.stars_rounded,
+                        size: 17,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: Text(
+                        actionText,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SkinPortrait extends StatelessWidget {
+  const _SkinPortrait({
+    required this.image,
+    required this.color,
+    required this.size,
+  });
+
+  final ui.Image? image;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color.withValues(alpha: 0.18),
+        border: Border.all(color: color, width: 3),
+      ),
+      child: image == null
+          ? Icon(Icons.person_rounded, color: color, size: size * 0.5)
+          : RawImage(image: image, fit: BoxFit.contain),
+    );
+  }
+}
+
+class _CoinStrip extends StatelessWidget {
+  const _CoinStrip({required this.coins});
+
+  final int coins;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xff182035),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: const Color(0xffffd64c), width: 2),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.stars_rounded, color: Color(0xffffd64c), size: 19),
+          const SizedBox(width: 6),
+          Text(
+            coins.toString(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuButton extends StatelessWidget {
+  const _MenuButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xff182035),
+        side: const BorderSide(color: Color(0xff182035), width: 2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      onPressed: onPressed,
+      icon: Icon(icon),
+      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+    );
+  }
+}
+
+_StoreSkin _skinForAvatar(PlayerAvatar avatar) {
+  return _storeSkins.firstWhere(
+    (skin) => skin.avatar == avatar,
+    orElse: () => _storeSkins.first,
+  );
 }
 
 class _GameHud extends StatelessWidget {
@@ -1236,13 +1926,19 @@ class _CooldownRingPainter extends CustomPainter {
 class _ResultsOverlay extends StatelessWidget {
   const _ResultsOverlay({
     required this.simulation,
+    required this.coins,
+    required this.reward,
     required this.onPlayAgain,
-    required this.onMenu,
+    required this.onStore,
+    required this.onHome,
   });
 
   final PlaygroundBlitzSimulation simulation;
+  final int coins;
+  final int reward;
   final VoidCallback onPlayAgain;
-  final VoidCallback onMenu;
+  final VoidCallback onStore;
+  final VoidCallback onHome;
 
   @override
   Widget build(BuildContext context) {
@@ -1270,12 +1966,14 @@ class _ResultsOverlay extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                'You scored ${human.score.round()} with ${human.tags} tag${human.tags == 1 ? '' : 's'}. ${winner.name} led with ${winner.score.round()} points.',
+                'You scored ${human.score.round()} with ${human.tags} tag${human.tags == 1 ? '' : 's'}. Reward: +$reward coins.',
                 style: TextStyle(
                   color: const Color(0xff182035).withValues(alpha: 0.72),
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: 10),
+              _CoinStrip(coins: coins),
               const SizedBox(height: 18),
               Row(
                 children: [
@@ -1288,8 +1986,15 @@ class _ResultsOverlay extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: onMenu,
-                      child: const Text('Setup'),
+                      onPressed: onStore,
+                      child: const Text('Store'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: onHome,
+                      child: const Text('Home'),
                     ),
                   ),
                 ],

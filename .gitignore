@@ -11,6 +11,8 @@ build/
 coverage/
 *.iml
 flutter-*.png
+flutter-web.log
+flutter-web.err
 android/.gradle/
 android/app/build/
 android/build/
