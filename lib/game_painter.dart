@@ -16,6 +16,7 @@ class PlaygroundPainter extends CustomPainter {
     this.backgrounds = const {},
     this.avatars = const {},
     this.humanAvatar = PlayerAvatar.blue,
+    this.baseArena = ArenaBackground.base,
   });
 
   final PlaygroundBlitzSimulation simulation;
@@ -23,6 +24,7 @@ class PlaygroundPainter extends CustomPainter {
   final Map<ArenaBackground, ui.Image> backgrounds;
   final Map<PlayerAvatar, ui.Image> avatars;
   final PlayerAvatar humanAvatar;
+  final ArenaBackground baseArena;
 
   static const _ink = Color(0xff111820);
   static const _asphalt = Color(0xff756f64);
@@ -50,6 +52,7 @@ class PlaygroundPainter extends CustomPainter {
     canvas.save();
     canvas.translate(offset.dx, offset.dy);
     canvas.scale(scale);
+    canvas.clipRect(Offset.zero & PlaygroundBlitzSimulation.worldSize);
     _drawWorld(canvas);
     canvas.restore();
   }
@@ -118,7 +121,7 @@ class PlaygroundPainter extends CustomPainter {
     if (simulation.bellZone.active) {
       return ArenaBackground.bellZone;
     }
-    return ArenaBackground.base;
+    return baseArena;
   }
 
   void _drawApprovedBackground(Canvas canvas, ui.Image image) {

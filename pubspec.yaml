@@ -59,6 +59,7 @@ flutter:
     - assets/backgrounds/playground_bell_zone.png
     - assets/backgrounds/playground_shrinking_yard.png
     - assets/backgrounds/playground_frenzy.png
+    - assets/home/home_screen_reference.png
     - assets/avatars/avatar_blue.png
     - assets/avatars/avatar_red.png
     - assets/avatars/avatar_yellow.png

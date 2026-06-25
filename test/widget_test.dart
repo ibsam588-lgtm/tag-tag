@@ -9,11 +9,13 @@ void main() {
     await tester.pumpWidget(const TagTagApp());
     await tester.pump();
 
-    expect(find.text('Tag Tag'), findsOneWidget);
-    expect(find.text('Store'), findsOneWidget);
-    expect(find.text('Setup'), findsOneWidget);
+    expect(find.text('TAG TAG'), findsOneWidget);
+    expect(find.text('STORE'), findsOneWidget);
+    expect(find.text('SETUP'), findsOneWidget);
 
-    await tester.tap(find.text('Play'));
+    await tester.ensureVisible(find.text('PLAY'));
+    await tester.pump();
+    await tester.tap(find.text('PLAY'));
     await tester.pump();
 
     expect(find.text('Stamina Chase'), findsOneWidget);

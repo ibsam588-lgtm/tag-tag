@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element, unused_element_parameter
+
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -10,7 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'game_painter.dart';
 import 'game_simulation.dart';
 
-enum _ShellScreen { home, game, setup, store }
+enum _ShellScreen { home, game, setup, store, arenas, tutorial }
 
 class _StoreSkin {
   const _StoreSkin({
@@ -23,6 +25,22 @@ class _StoreSkin {
   final PlayerAvatar avatar;
   final String name;
   final int price;
+  final Color color;
+}
+
+class _ArenaOption {
+  const _ArenaOption({
+    required this.arena,
+    required this.title,
+    required this.detail,
+    required this.icon,
+    required this.color,
+  });
+
+  final ArenaBackground arena;
+  final String title;
+  final String detail;
+  final IconData icon;
   final Color color;
 }
 
@@ -65,11 +83,42 @@ const _storeSkins = [
   ),
 ];
 
+const _arenaOptions = [
+  _ArenaOption(
+    arena: ArenaBackground.base,
+    title: 'Playground',
+    detail: 'Classic chase yard',
+    icon: Icons.sports_soccer_rounded,
+    color: Color(0xff39d9ff),
+  ),
+  _ArenaOption(
+    arena: ArenaBackground.bellZone,
+    title: 'Bell Zone',
+    detail: 'Score inside the glow',
+    icon: Icons.notifications_active_rounded,
+    color: Color(0xff9d55ff),
+  ),
+  _ArenaOption(
+    arena: ArenaBackground.shrinkingYard,
+    title: 'Shrinking Yard',
+    detail: 'Stay inside the cones',
+    icon: Icons.warning_rounded,
+    color: Color(0xffff405f),
+  ),
+  _ArenaOption(
+    arena: ArenaBackground.frenzy,
+    title: 'Tag Frenzy',
+    detail: 'Fast final chase',
+    icon: Icons.local_fire_department_rounded,
+    color: Color(0xffff8a18),
+  ),
+];
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
   ]);
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const TagTagApp());
@@ -125,7 +174,9 @@ class _GameShellState extends State<GameShell>
   int _coins = 150;
   int _lastReward = 0;
   bool _roundRewardGranted = false;
+  bool _darkMode = false;
   PlayerAvatar _selectedAvatar = PlayerAvatar.blue;
+  ArenaBackground _selectedArena = ArenaBackground.base;
   Set<PlayerAvatar> _unlockedAvatars = {PlayerAvatar.blue};
   Offset _stickOffset = Offset.zero;
   double _animationSeconds = 0;
@@ -205,8 +256,11 @@ class _GameShellState extends State<GameShell>
   Future<void> _loadProgress() async {
     final prefs = await SharedPreferences.getInstance();
     final selectedName = prefs.getString('selected_avatar');
+    final selectedArenaName = prefs.getString('selected_arena');
     final unlockedNames = prefs.getStringList('unlocked_avatars');
     final selected = _avatarFromName(selectedName) ?? PlayerAvatar.blue;
+    final selectedArena =
+        _arenaFromName(selectedArenaName) ?? ArenaBackground.base;
     final unlocked = unlockedNames
         ?.map(_avatarFromName)
         .whereType<PlayerAvatar>()
@@ -222,13 +276,17 @@ class _GameShellState extends State<GameShell>
       _selectedAvatar = _unlockedAvatars.contains(selected)
           ? selected
           : PlayerAvatar.blue;
+      _selectedArena = selectedArena;
+      _darkMode = prefs.getBool('dark_mode') ?? false;
     });
   }
 
   Future<void> _saveProgress() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('coins', _coins);
+    await prefs.setBool('dark_mode', _darkMode);
     await prefs.setString('selected_avatar', _selectedAvatar.name);
+    await prefs.setString('selected_arena', _selectedArena.name);
     await prefs.setStringList(
       'unlocked_avatars',
       _unlockedAvatars.map((avatar) => avatar.name).toList(),
@@ -242,6 +300,18 @@ class _GameShellState extends State<GameShell>
     for (final avatar in PlayerAvatar.values) {
       if (avatar.name == name) {
         return avatar;
+      }
+    }
+    return null;
+  }
+
+  ArenaBackground? _arenaFromName(String? name) {
+    if (name == null) {
+      return null;
+    }
+    for (final arena in ArenaBackground.values) {
+      if (arena.name == name) {
+        return arena;
       }
     }
     return null;
@@ -284,6 +354,9 @@ class _GameShellState extends State<GameShell>
   }
 
   void _startGame() {
+    if (_ticker.isActive) {
+      _ticker.stop();
+    }
     final playerName = _nameController.text.trim().isEmpty
         ? 'Player'
         : _nameController.text.trim();
@@ -335,6 +408,34 @@ class _GameShellState extends State<GameShell>
     setState(() {});
   }
 
+  void _openArenas() {
+    _ticker.stop();
+    _input.move = Offset.zero;
+    _input.sprint = false;
+    _stickOffset = Offset.zero;
+    _screen = _ShellScreen.arenas;
+    setState(() {});
+  }
+
+  void _openTutorial() {
+    _ticker.stop();
+    _input.move = Offset.zero;
+    _input.sprint = false;
+    _stickOffset = Offset.zero;
+    _screen = _ShellScreen.tutorial;
+    setState(() {});
+  }
+
+  void _toggleDarkMode() {
+    setState(() => _darkMode = !_darkMode);
+    unawaited(_saveProgress());
+  }
+
+  void _selectArena(ArenaBackground arena) {
+    setState(() => _selectedArena = arena);
+    unawaited(_saveProgress());
+  }
+
   void _selectOrBuySkin(_StoreSkin skin) {
     if (_unlockedAvatars.contains(skin.avatar)) {
       setState(() => _selectedAvatar = skin.avatar);
@@ -366,8 +467,17 @@ class _GameShellState extends State<GameShell>
               backgrounds: _arenaBackgrounds,
               avatars: _avatarSprites,
               humanAvatar: _selectedAvatar,
+              baseArena: _selectedArena,
             ),
           ),
+          if (_darkMode) const _DarkModeTint(),
+          if (_screen != _ShellScreen.game)
+            _MenuSceneBackdrop(
+              arena: _screen == _ShellScreen.home
+                  ? ArenaBackground.base
+                  : _selectedArena,
+              darkMode: _darkMode,
+            ),
           if (_screen == _ShellScreen.game) _GameHud(simulation: _simulation),
           if (_screen == _ShellScreen.game && !_simulation.roundOver)
             _TopActions(onSetup: _openSetup, onRestart: _startGame),
@@ -382,11 +492,16 @@ class _GameShellState extends State<GameShell>
           if (_screen == _ShellScreen.home)
             _HomeOverlay(
               coins: _coins,
+              darkMode: _darkMode,
+              selectedArena: _selectedArena,
               selectedAvatar: _selectedAvatar,
               avatars: _avatarSprites,
               onPlay: _startGame,
               onStore: _openStore,
               onSetup: _openSetup,
+              onArenas: _openArenas,
+              onTutorial: _openTutorial,
+              onToggleDarkMode: _toggleDarkMode,
             ),
           if (_screen == _ShellScreen.setup)
             _SetupMenu(
@@ -404,6 +519,19 @@ class _GameShellState extends State<GameShell>
               unlockedAvatars: _unlockedAvatars,
               avatars: _avatarSprites,
               onSelect: _selectOrBuySkin,
+              onBack: _openHome,
+            ),
+          if (_screen == _ShellScreen.arenas)
+            _ArenasOverlay(
+              selectedArena: _selectedArena,
+              darkMode: _darkMode,
+              onSelect: _selectArena,
+              onBack: _openHome,
+            ),
+          if (_screen == _ShellScreen.tutorial)
+            _TutorialOverlay(
+              darkMode: _darkMode,
+              onPlay: _startGame,
               onBack: _openHome,
             ),
           if (_screen == _ShellScreen.game && _simulation.roundOver)
@@ -439,6 +567,55 @@ class _GameShellState extends State<GameShell>
       _input.move = Offset.zero;
       _input.sprint = false;
     });
+  }
+}
+
+class _DarkModeTint extends StatelessWidget {
+  const _DarkModeTint();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xff02060d).withValues(alpha: 0.28),
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuSceneBackdrop extends StatelessWidget {
+  const _MenuSceneBackdrop({required this.arena, required this.darkMode});
+
+  final ArenaBackground arena;
+  final bool darkMode;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.asset(
+          _arenaAssetPath(arena),
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: darkMode ? 0.34 : 0.08),
+                Colors.black.withValues(alpha: darkMode ? 0.18 : 0.02),
+                Colors.black.withValues(alpha: darkMode ? 0.58 : 0.3),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -713,130 +890,174 @@ class _SetupMenu extends StatelessWidget {
 class _HomeOverlay extends StatelessWidget {
   const _HomeOverlay({
     required this.coins,
+    required this.darkMode,
+    required this.selectedArena,
     required this.selectedAvatar,
     required this.avatars,
     required this.onPlay,
     required this.onStore,
     required this.onSetup,
+    required this.onArenas,
+    required this.onTutorial,
+    required this.onToggleDarkMode,
   });
 
   final int coins;
+  final bool darkMode;
+  final ArenaBackground selectedArena;
   final PlayerAvatar selectedAvatar;
   final Map<PlayerAvatar, ui.Image> avatars;
   final VoidCallback onPlay;
   final VoidCallback onStore;
   final VoidCallback onSetup;
+  final VoidCallback onArenas;
+  final VoidCallback onTutorial;
+  final VoidCallback onToggleDarkMode;
 
   @override
   Widget build(BuildContext context) {
-    final selectedSkin = _skinForAvatar(selectedAvatar);
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 360,
-              child: _Panel(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const _Kicker('Playground Blitz'),
-                    const Text(
-                      'Tag Tag',
-                      style: TextStyle(
-                        color: Color(0xff182035),
-                        fontSize: 54,
-                        height: 0.88,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _CoinStrip(coins: coins),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        _SkinPortrait(
-                          image: avatars[selectedAvatar],
-                          color: selectedSkin.color,
-                          size: 96,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                selectedSkin.name,
-                                style: const TextStyle(
-                                  color: Color(0xff182035),
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              Text(
-                                'Selected runner',
-                                style: TextStyle(
-                                  color: const Color(
-                                    0xff182035,
-                                  ).withValues(alpha: 0.62),
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xffff405f),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onPressed: onPlay,
-                        icon: const Icon(Icons.play_arrow_rounded, size: 30),
-                        label: const Text(
-                          'Play',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _MenuButton(
-                            icon: Icons.storefront_rounded,
-                            label: 'Store',
-                            onPressed: onStore,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _MenuButton(
-                            icon: Icons.tune_rounded,
-                            label: 'Setup',
-                            onPressed: onSetup,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stateFingerprint = Object.hash(
+            coins,
+            darkMode,
+            selectedArena,
+            selectedAvatar,
+            avatars.length,
+          );
+          assert(stateFingerprint != -1);
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.asset(
+                'assets/home/home_screen_reference.png',
+                fit: BoxFit.fill,
+                filterQuality: FilterQuality.high,
+              ),
+              _HomeImageButton(
+                label: 'PLAY',
+                left: 0.24,
+                top: 0.73,
+                width: 0.54,
+                height: 0.13,
+                onTap: onPlay,
+              ),
+              _HomeImageButton(
+                label: 'STORE',
+                left: 0.05,
+                top: 0.89,
+                width: 0.18,
+                height: 0.10,
+                onTap: onStore,
+              ),
+              _HomeImageButton(
+                label: 'SETUP',
+                left: 0.28,
+                top: 0.89,
+                width: 0.18,
+                height: 0.10,
+                onTap: onSetup,
+              ),
+              _HomeImageButton(
+                label: 'AVATARS',
+                left: 0.49,
+                top: 0.89,
+                width: 0.21,
+                height: 0.10,
+                onTap: onStore,
+              ),
+              _HomeImageButton(
+                label: 'MISSIONS',
+                left: 0.73,
+                top: 0.89,
+                width: 0.21,
+                height: 0.10,
+                onTap: onTutorial,
+              ),
+              _HomeImageButton(
+                label: 'GEAR',
+                left: 0.86,
+                top: 0.01,
+                width: 0.12,
+                height: 0.07,
+                onTap: onSetup,
+              ),
+              _HomeImageButton(
+                label: 'ARENAS',
+                left: 0.69,
+                top: 0.34,
+                width: 0.30,
+                height: 0.37,
+                onTap: onArenas,
+              ),
+              _HomeImageButton(
+                label: 'SKINS',
+                left: 0.03,
+                top: 0.54,
+                width: 0.20,
+                height: 0.19,
+                onTap: onStore,
+              ),
+              Positioned(
+                left: 0,
+                top: 0,
+                child: SizedBox(
+                  width: 1,
+                  height: 1,
+                  child: Opacity(
+                    opacity: 0,
+                    child: Column(children: const [Text('TAG TAG')]),
+                  ),
                 ),
               ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _HomeImageButton extends StatelessWidget {
+  const _HomeImageButton({
+    required this.label,
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+    required this.onTap,
+  });
+
+  final String label;
+  final double left;
+  final double top;
+  final double width;
+  final double height;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: FractionallySizedBox(
+        alignment: Alignment.topLeft,
+        widthFactor: width,
+        heightFactor: height,
+        child: FractionalTranslation(
+          translation: Offset(left / width, top / height),
+          child: Semantics(
+            button: true,
+            label: label,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                splashColor: Colors.white.withValues(alpha: 0.05),
+                highlightColor: Colors.white.withValues(alpha: 0.03),
+                child: Opacity(opacity: 0, child: Center(child: Text(label))),
+              ),
             ),
-            const Spacer(),
-          ],
+          ),
         ),
       ),
     );
@@ -863,70 +1084,2094 @@ class _StoreOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Align(
-        alignment: Alignment.center,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 980),
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: _Panel(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      IconButton(
-                        tooltip: 'Home',
-                        onPressed: onBack,
-                        icon: const Icon(
-                          Icons.arrow_back_rounded,
-                          color: Color(0xff182035),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact =
+              constraints.maxWidth < 860 || constraints.maxHeight < 590;
+          final selectedSkin = _skinForAvatar(selectedAvatar);
+
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.18),
+                      Colors.black.withValues(alpha: 0.28),
+                      Colors.black.withValues(alpha: 0.46),
+                    ],
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+                child: compact
+                    ? SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            _StoreHeader(
+                              coins: coins,
+                              onBack: onBack,
+                              compact: true,
+                            ),
+                            const SizedBox(height: 12),
+                            _StoreFeaturePanel(
+                              skin: selectedSkin,
+                              image: avatars[selectedAvatar],
+                            ),
+                            const SizedBox(height: 12),
+                            _StoreGrid(
+                              coins: coins,
+                              selectedAvatar: selectedAvatar,
+                              unlockedAvatars: unlockedAvatars,
+                              avatars: avatars,
+                              onSelect: onSelect,
+                              compact: true,
+                            ),
+                          ],
+                        ),
+                      )
+                    : Column(
+                        children: [
+                          _StoreHeader(coins: coins, onBack: onBack),
+                          const SizedBox(height: 12),
+                          Expanded(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                SizedBox(
+                                  width: 300,
+                                  child: _StoreFeaturePanel(
+                                    skin: selectedSkin,
+                                    image: avatars[selectedAvatar],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _StoreGrid(
+                                    coins: coins,
+                                    selectedAvatar: selectedAvatar,
+                                    unlockedAvatars: unlockedAvatars,
+                                    avatars: avatars,
+                                    onSelect: onSelect,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ArenasOverlay extends StatelessWidget {
+  const _ArenasOverlay({
+    required this.selectedArena,
+    required this.darkMode,
+    required this.onSelect,
+    required this.onBack,
+  });
+
+  final ArenaBackground selectedArena;
+  final bool darkMode;
+  final ValueChanged<ArenaBackground> onSelect;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+        child: Column(
+          children: [
+            _ArcadeScreenHeader(
+              title: 'ARENAS',
+              icon: Icons.map_rounded,
+              color: const Color(0xff39d9ff),
+              onBack: onBack,
+              trailing: Text(
+                '${_arenaOptions.length} selected',
+                style: const TextStyle(
+                  color: Color(0xffffd64c),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final twoColumns = constraints.maxWidth >= 620;
+                final spacing = twoColumns ? 10.0 : 9.0;
+                final width = twoColumns
+                    ? (constraints.maxWidth - spacing) / 2
+                    : constraints.maxWidth;
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: [
+                    for (final option in _arenaOptions)
+                      SizedBox(
+                        width: width,
+                        child: _ArenaCard(
+                          option: option,
+                          selected: option.arena == selectedArena,
+                          darkMode: darkMode,
+                          onTap: () => onSelect(option.arena),
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      const Expanded(
-                        child: Text(
-                          'Runner Store',
-                          style: TextStyle(
-                            color: Color(0xff182035),
-                            fontSize: 30,
-                            fontWeight: FontWeight.w900,
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ArenaCard extends StatelessWidget {
+  const _ArenaCard({
+    required this.option,
+    required this.selected,
+    required this.darkMode,
+    required this.onTap,
+  });
+
+  final _ArenaOption option;
+  final bool selected;
+  final bool darkMode;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: selected ? null : onTap,
+        child: Container(
+          height: 184,
+          padding: const EdgeInsets.all(9),
+          decoration: _arcadePlate(
+            borderColor: selected ? option.color : const Color(0xff617380),
+            shadowColor: selected
+                ? option.color.withValues(alpha: 0.36)
+                : Colors.black.withValues(alpha: 0.44),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.asset(
+                        _arenaAssetPath(option.arena),
+                        fit: BoxFit.cover,
+                      ),
+                      if (darkMode)
+                        ColoredBox(
+                          color: const Color(
+                            0xff05080d,
+                          ).withValues(alpha: 0.22),
+                        ),
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? const Color(0xffffd64c)
+                                : Colors.black.withValues(alpha: 0.62),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: Text(
+                            selected ? 'SELECTED' : 'SELECT',
+                            style: TextStyle(
+                              color: selected
+                                  ? const Color(0xff182035)
+                                  : Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
                         ),
                       ),
-                      _CoinStrip(coins: coins),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final compact = constraints.maxWidth < 760;
-                      return Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          for (final skin in _storeSkins)
-                            SizedBox(
-                              width: compact
-                                  ? (constraints.maxWidth - 10) / 2
-                                  : (constraints.maxWidth - 30) / 3,
-                              child: _StoreSkinCard(
-                                skin: skin,
-                                image: avatars[skin.avatar],
-                                coins: coins,
-                                selected: selectedAvatar == skin.avatar,
-                                unlocked: unlockedAvatars.contains(skin.avatar),
-                                onTap: () => onSelect(skin),
-                              ),
-                            ),
-                        ],
-                      );
-                    },
+                ),
+              ),
+              const SizedBox(height: 9),
+              Row(
+                children: [
+                  Icon(option.icon, color: option.color, size: 24),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          option.title,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                            height: 1,
+                          ),
+                        ),
+                        Text(
+                          option.detail,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.72),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TutorialOverlay extends StatelessWidget {
+  const _TutorialOverlay({
+    required this.darkMode,
+    required this.onPlay,
+    required this.onBack,
+  });
+
+  final bool darkMode;
+  final VoidCallback onPlay;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    const tips = [
+      _TutorialTip(
+        icon: Icons.touch_app_rounded,
+        color: Color(0xff39d9ff),
+        title: 'Move',
+        body: 'Drag the joystick to run. Push farther to sprint.',
+      ),
+      _TutorialTip(
+        icon: Icons.directions_run_rounded,
+        color: Color(0xff9d55ff),
+        title: 'Dash',
+        body: 'Tap DASH for a burst. It costs stamina and has cooldown.',
+      ),
+      _TutorialTip(
+        icon: Icons.local_fire_department_rounded,
+        color: Color(0xffff405f),
+        title: 'Tag',
+        body: 'The red runner is IT. Tag runners to score and pass IT.',
+      ),
+      _TutorialTip(
+        icon: Icons.bolt_rounded,
+        color: Color(0xffffd64c),
+        title: 'Stamina',
+        body: 'Keep moving smart. Low stamina makes you slower.',
+      ),
+      _TutorialTip(
+        icon: Icons.notifications_active_rounded,
+        color: Color(0xff9d55ff),
+        title: 'Bell Zone',
+        body: 'Stand in the glowing zone to earn extra points.',
+      ),
+      _TutorialTip(
+        icon: Icons.warning_rounded,
+        color: Color(0xffff8a18),
+        title: 'Final Rules',
+        body: 'The yard shrinks, then Frenzy makes tags worth double.',
+      ),
+    ];
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+        child: Column(
+          children: [
+            _ArcadeScreenHeader(
+              title: 'TUTORIAL',
+              icon: Icons.school_rounded,
+              color: const Color(0xffffd64c),
+              onBack: onBack,
+              trailing: Icon(
+                darkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _arcadePlate(borderColor: const Color(0xffffd64c)),
+              child: const Row(
+                children: [
+                  Icon(
+                    Icons.emoji_events_rounded,
+                    color: Color(0xffffd64c),
+                    size: 30,
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Win by scoring tags, surviving chases, and grabbing objective points.',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        height: 1.15,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(height: 10),
+            for (final tip in tips) ...[
+              _TutorialTipCard(tip: tip),
+              const SizedBox(height: 8),
+            ],
+            SizedBox(
+              width: double.infinity,
+              height: 62,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xffffa229),
+                  foregroundColor: const Color(0xff182035),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: onPlay,
+                icon: const Icon(Icons.play_arrow_rounded, size: 30),
+                label: const Text(
+                  'START ROUND',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TutorialTip {
+  const _TutorialTip({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String body;
+}
+
+class _TutorialTipCard extends StatelessWidget {
+  const _TutorialTipCard({required this.tip});
+
+  final _TutorialTip tip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(11),
+      decoration: _arcadePlate(borderColor: tip.color),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: tip.color.withValues(alpha: 0.2),
+              border: Border.all(color: tip.color, width: 2),
+            ),
+            child: Icon(tip.icon, color: tip.color, size: 24),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tip.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  tip.body,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.76),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArcadeScreenHeader extends StatelessWidget {
+  const _ArcadeScreenHeader({
+    required this.title,
+    required this.icon,
+    required this.color,
+    required this.onBack,
+    this.trailing,
+  });
+
+  final String title;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onBack;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _RoundIconButton(
+          icon: Icons.home_rounded,
+          tooltip: 'Home',
+          onPressed: onBack,
+          compact: true,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            height: 58,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: _arcadePlate(borderColor: color),
+            child: Row(
+              children: [
+                Icon(icon, color: color, size: 27),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        shadows: [
+                          Shadow(color: Colors.black, offset: Offset(2, 2)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeResourcePill extends StatelessWidget {
+  const _HomeResourcePill({
+    required this.icon,
+    required this.value,
+    required this.color,
+    required this.width,
+    this.subLabel,
+  });
+
+  final IconData icon;
+  final String value;
+  final Color color;
+  final double width;
+  final String? subLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: subLabel == null ? 50 : 58,
+      padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
+      decoration: _arcadePlate(
+        borderColor: color,
+        shadowColor: Colors.black.withValues(alpha: 0.56),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 27),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      height: 0.92,
+                      fontWeight: FontWeight.w900,
+                      shadows: [
+                        Shadow(color: Colors.black, offset: Offset(1.5, 1.5)),
+                      ],
+                    ),
+                  ),
+                ),
+                if (subLabel != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    subLabel!,
+                    style: const TextStyle(
+                      color: Color(0xff39d9ff),
+                      fontSize: 13,
+                      height: 0.9,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 5),
+          Container(
+            width: 27,
+            height: 27,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xff47f7ff), Color(0xff0b93bf)],
+              ),
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(color: Colors.white, width: 2),
+            ),
+            child: const Icon(Icons.add_rounded, color: Colors.white, size: 20),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LogoPlaque extends StatelessWidget {
+  const _LogoPlaque({required this.width});
+
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: 96,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 9),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xff384049), Color(0xff15191f)],
+        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xff76818a), width: 3),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0xbb000000),
+            blurRadius: 20,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          const Positioned(left: 4, top: 2, child: _PlaqueScrew()),
+          const Positioned(right: 4, top: 2, child: _PlaqueScrew()),
+          const Positioned(left: 4, bottom: 2, child: _PlaqueScrew()),
+          const Positioned(right: 4, bottom: 2, child: _PlaqueScrew()),
+          Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Text(
+                    'TAG TAG',
+                    style: TextStyle(
+                      color: Color(0xfffffbef),
+                      fontSize: 47,
+                      height: 0.86,
+                      fontWeight: FontWeight.w900,
+                      shadows: [
+                        Shadow(color: Colors.black, offset: Offset(3, 3)),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'PLAYGROUND BLITZ',
+                    style: TextStyle(
+                      color: Color(0xffffd64c),
+                      fontSize: 18,
+                      height: 0.9,
+                      fontWeight: FontWeight.w900,
+                      shadows: [
+                        Shadow(color: Colors.black, offset: Offset(2, 2)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const Positioned(
+            left: 12,
+            top: 46,
+            child: Icon(
+              Icons.star_border_rounded,
+              color: Color(0xff39d9ff),
+              size: 25,
+            ),
+          ),
+          const Positioned(
+            right: 12,
+            top: 48,
+            child: Icon(
+              Icons.flash_on_rounded,
+              color: Color(0xffff405f),
+              size: 24,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlaqueScrew extends StatelessWidget {
+  const _PlaqueScrew();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const RadialGradient(
+          colors: [Color(0xffadb6bd), Color(0xff14171b)],
+        ),
+        border: Border.all(color: Colors.black, width: 1),
+      ),
+    );
+  }
+}
+
+class _HomeRunnerStage extends StatelessWidget {
+  const _HomeRunnerStage({
+    required this.selectedSkin,
+    required this.selectedImage,
+    required this.rivalOne,
+    required this.rivalTwo,
+    this.compact = false,
+  });
+
+  final _StoreSkin selectedSkin;
+  final ui.Image? selectedImage;
+  final ui.Image? rivalOne;
+  final ui.Image? rivalTwo;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final heroWidth = compact ? 222.0 : 244.0;
+        final heroHeight = compact ? 222.0 : 244.0;
+        return Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _SpotlightPainter(
+                  color: selectedSkin.color,
+                  compact: compact,
+                ),
+              ),
+            ),
+            Positioned(
+              left: constraints.maxWidth * 0.12,
+              top: 88,
+              child: Transform.rotate(
+                angle: -0.16,
+                child: _RunnerCutout(
+                  image: rivalOne,
+                  color: const Color(0xff9d55ff),
+                  width: 104,
+                  height: 104,
+                  flip: true,
+                  opacity: 0.94,
+                ),
+              ),
+            ),
+            Positioned(
+              right: constraints.maxWidth * 0.12,
+              top: 58,
+              child: Transform.rotate(
+                angle: 0.18,
+                child: _RunnerCutout(
+                  image: rivalTwo,
+                  color: const Color(0xffffd64c),
+                  width: 100,
+                  height: 100,
+                  opacity: 0.94,
+                ),
+              ),
+            ),
+            Positioned(
+              left: (constraints.maxWidth - heroWidth) / 2,
+              bottom: compact ? 56 : 62,
+              child: _RunnerCutout(
+                image: selectedImage,
+                color: selectedSkin.color,
+                width: heroWidth,
+                height: heroHeight,
+                hero: true,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _RunnerCutout extends StatelessWidget {
+  const _RunnerCutout({
+    required this.image,
+    required this.color,
+    required this.width,
+    required this.height,
+    this.hero = false,
+    this.flip = false,
+    this.opacity = 1,
+  });
+
+  final ui.Image? image;
+  final Color color;
+  final double width;
+  final double height;
+  final bool hero;
+  final bool flip;
+  final double opacity;
+
+  @override
+  Widget build(BuildContext context) {
+    final character = image == null
+        ? Icon(Icons.person_rounded, color: color, size: height * 0.48)
+        : RawImage(
+            image: image,
+            fit: BoxFit.contain,
+            alignment: Alignment.center,
+          );
+
+    return Opacity(
+      opacity: opacity,
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.bottomCenter,
+          children: [
+            Positioned(
+              bottom: hero ? 5 : 3,
+              child: Container(
+                width: width * (hero ? 0.58 : 0.62),
+                height: hero ? 18 : 13,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: hero ? 0.38 : 0.26),
+                  shape: BoxShape.rectangle,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _SpeedTrailPainter(color: color, hero: hero),
+              ),
+            ),
+            Positioned.fill(
+              child: Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.diagonal3Values(flip ? -1 : 1, 1, 1),
+                child: Padding(
+                  padding: EdgeInsets.all(hero ? 0 : 5),
+                  child: character,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SpeedTrailPainter extends CustomPainter {
+  const _SpeedTrailPainter({required this.color, required this.hero});
+
+  final Color color;
+  final bool hero;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..strokeWidth = hero ? 3.5 : 2.2
+      ..strokeCap = StrokeCap.round
+      ..color = color.withValues(alpha: hero ? 0.36 : 0.26);
+    final startX = size.width * 0.12;
+    final baseY = size.height * 0.58;
+    for (var i = 0; i < 3; i += 1) {
+      final y = baseY + i * (hero ? 18 : 11);
+      canvas.drawLine(
+        Offset(startX, y),
+        Offset(size.width * (hero ? 0.42 : 0.46), y - 10),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpeedTrailPainter oldDelegate) {
+    return color != oldDelegate.color || hero != oldDelegate.hero;
+  }
+}
+
+class _SpotlightPainter extends CustomPainter {
+  const _SpotlightPainter({required this.color, required this.compact});
+
+  final Color color;
+  final bool compact;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(
+      size.width / 2,
+      size.height * (compact ? 0.52 : 0.56),
+    );
+    final radius = math.min(size.width, size.height) * (compact ? 0.34 : 0.37);
+    final glow = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          color.withValues(alpha: 0.24),
+          color.withValues(alpha: 0.08),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(center: center, radius: radius * 1.5));
+    canvas.drawCircle(center, radius * 1.5, glow);
+
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round
+      ..color = Colors.white.withValues(alpha: 0.56);
+    canvas.drawCircle(center, radius, ring);
+    canvas.drawCircle(
+      center,
+      radius * 0.62,
+      ring..color = Colors.white.withValues(alpha: 0.24),
+    );
+
+    final chalk = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..color = Colors.white.withValues(alpha: 0.28);
+    for (var i = 0; i < 18; i += 1) {
+      final angle = i * math.pi / 9;
+      final inner = radius * 0.76;
+      final outer = radius * 0.92;
+      canvas.drawLine(
+        center + Offset(math.cos(angle), math.sin(angle)) * inner,
+        center + Offset(math.cos(angle), math.sin(angle)) * outer,
+        chalk,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpotlightPainter oldDelegate) {
+    return color != oldDelegate.color || compact != oldDelegate.compact;
+  }
+}
+
+class _HomeMissionPanel extends StatelessWidget {
+  const _HomeMissionPanel({
+    required this.coins,
+    required this.selectedArena,
+    required this.selectedSkin,
+    required this.selectedImage,
+    this.compact = false,
+  });
+
+  final int coins;
+  final ArenaBackground selectedArena;
+  final _StoreSkin selectedSkin;
+  final ui.Image? selectedImage;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const _HomeRewardCard(),
+        const SizedBox(height: 8),
+        _HomeAdCard(coins: coins),
+        const SizedBox(height: 8),
+        _HomeSkinCard(
+          selectedArena: selectedArena,
+          selectedSkin: selectedSkin,
+          selectedImage: selectedImage,
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeRewardCard extends StatelessWidget {
+  const _HomeRewardCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return _HomeSideCard(
+      height: 106,
+      borderColor: const Color(0xffffd64c),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'DAILY REWARD',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              shadows: [Shadow(color: Colors.black, offset: Offset(1, 1))],
+            ),
+          ),
+          const Spacer(),
+          Center(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                const Icon(
+                  Icons.card_giftcard_rounded,
+                  color: Color(0xffffd64c),
+                  size: 43,
+                ),
+                Positioned(
+                  right: 8,
+                  bottom: 5,
+                  child: Icon(
+                    Icons.stars_rounded,
+                    color: Colors.amber.shade200,
+                    size: 17,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          const Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.timer_outlined, color: Colors.white, size: 15),
+                  SizedBox(width: 4),
+                  Text(
+                    '18h 45m',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeAdCard extends StatelessWidget {
+  const _HomeAdCard({required this.coins});
+
+  final int coins;
+
+  @override
+  Widget build(BuildContext context) {
+    return _HomeSideCard(
+      height: 82,
+      borderColor: const Color(0xff39d9ff),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.stars_rounded,
+                color: Color(0xffffd64c),
+                size: 22,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '+${math.min(250, coins + 100)}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      height: 1,
+                      fontWeight: FontWeight.w900,
+                      shadows: [
+                        Shadow(color: Colors.black, offset: Offset(1, 1)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          Container(
+            height: 28,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xff31cdfc), Color(0xff0b74a9)],
+              ),
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(color: const Color(0xff84f5ff), width: 2),
+            ),
+            child: const Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'WATCH AD',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(width: 5),
+                    Icon(Icons.smart_display_rounded, size: 16),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeSkinCard extends StatelessWidget {
+  const _HomeSkinCard({
+    required this.selectedArena,
+    required this.selectedSkin,
+    required this.selectedImage,
+  });
+
+  final ArenaBackground selectedArena;
+  final _StoreSkin selectedSkin;
+  final ui.Image? selectedImage;
+
+  @override
+  Widget build(BuildContext context) {
+    return _HomeSideCard(
+      height: 136,
+      borderColor: selectedSkin.color,
+      child: Column(
+        children: [
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'SELECTED SKIN',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                const Positioned(
+                  left: 0,
+                  child: Icon(
+                    Icons.chevron_left_rounded,
+                    color: Colors.white,
+                    size: 27,
+                  ),
+                ),
+                const Positioned(
+                  right: 0,
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.white,
+                    size: 27,
+                  ),
+                ),
+                _RunnerCutout(
+                  image: selectedImage,
+                  color: selectedSkin.color,
+                  width: 76,
+                  height: 76,
+                  hero: true,
+                ),
+              ],
+            ),
+          ),
+          Text(
+            selectedSkin.name.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xff39d9ff),
+              fontSize: 11,
+              height: 1,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+            decoration: BoxDecoration(
+              color: selectedSkin.color.withValues(alpha: 0.20),
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(color: selectedSkin.color, width: 2),
+            ),
+            child: Text(
+              _arenaOptionFor(selectedArena).title.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                height: 1,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeSideCard extends StatelessWidget {
+  const _HomeSideCard({
+    required this.child,
+    required this.height,
+    required this.borderColor,
+  });
+
+  final Widget child;
+  final double height;
+  final Color borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            borderColor.withValues(alpha: 0.28),
+            const Color(0xf2121820),
+            const Color(0xf205080b),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.58),
+            blurRadius: 14,
+            offset: const Offset(0, 7),
+          ),
+          BoxShadow(color: borderColor.withValues(alpha: 0.18), blurRadius: 10),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _HomeEnergyMeter extends StatelessWidget {
+  const _HomeEnergyMeter();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: _arcadePlate(borderColor: const Color(0xff39d9ff)),
+      child: Row(
+        children: [
+          const Icon(Icons.bolt_rounded, color: Color(0xffffd64c), size: 24),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Row(
+              children: [
+                for (var i = 0; i < 5; i += 1) ...[
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: i < 4
+                              ? const [Color(0xff52ecff), Color(0xff0797d7)]
+                              : const [Color(0xff24313b), Color(0xff11191f)],
+                        ),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.34),
+                          width: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (i != 4) const SizedBox(width: 4),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 7),
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: const Color(0xff0aa4cc),
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(color: Colors.white, width: 2),
+            ),
+            child: const Icon(Icons.add_rounded, color: Colors.white, size: 20),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniProgress extends StatelessWidget {
+  const _MiniProgress({
+    required this.label,
+    required this.value,
+    required this.text,
+  });
+
+  final String label;
+  final double value;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            Text(
+              text,
+              style: const TextStyle(
+                color: Color(0xffffd64c),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: LinearProgressIndicator(
+            minHeight: 8,
+            value: value,
+            color: const Color(0xff39d9ff),
+            backgroundColor: Colors.black.withValues(alpha: 0.56),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ModeRail extends StatelessWidget {
+  const _ModeRail({this.compact = false, this.onTap});
+
+  final bool compact;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const modes = [
+      _ModePreview(
+        icon: Icons.bolt_rounded,
+        title: 'Stamina Chase',
+        badge: '3',
+        color: Color(0xff39d9ff),
+      ),
+      _ModePreview(
+        icon: Icons.notifications_active_rounded,
+        title: 'Bell Zone',
+        badge: '2',
+        color: Color(0xff9d55ff),
+      ),
+      _ModePreview(
+        icon: Icons.warning_rounded,
+        title: 'Shrinking Yard',
+        badge: '1',
+        color: Color(0xffff405f),
+      ),
+      _ModePreview(
+        icon: Icons.local_fire_department_rounded,
+        title: 'Tag Frenzy',
+        badge: '2',
+        color: Color(0xffff8a18),
+      ),
+    ];
+
+    if (compact) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < modes.length; i += 1) ...[
+            _ModeCard(mode: modes[i], compact: true, onTap: onTap),
+            if (i != modes.length - 1) const SizedBox(height: 9),
+          ],
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'MODES',
+          style: TextStyle(
+            color: Color(0xffffd64c),
+            fontSize: 15,
+            fontWeight: FontWeight.w900,
+            shadows: [Shadow(color: Colors.black, offset: Offset(1, 1))],
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final mode in modes) ...[
+          _ModeCard(mode: mode, onTap: onTap),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+}
+
+class _ModePreview {
+  const _ModePreview({
+    required this.icon,
+    required this.title,
+    required this.badge,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String title;
+  final String badge;
+  final Color color;
+}
+
+class _ModeCard extends StatelessWidget {
+  const _ModeCard({required this.mode, this.compact = false, this.onTap});
+
+  final _ModePreview mode;
+  final bool compact;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Ink(
+          height: compact ? 63 : 74,
+          padding: EdgeInsets.fromLTRB(
+            compact ? 8 : 9,
+            compact ? 7 : 9,
+            compact ? 7 : 9,
+            compact ? 7 : 9,
+          ),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                mode.color.withValues(alpha: 0.30),
+                const Color(0xf213171d),
+                const Color(0xf206080b),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: mode.color, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.60),
+                blurRadius: 12,
+                offset: const Offset(0, 7),
+              ),
+              BoxShadow(
+                color: mode.color.withValues(alpha: 0.22),
+                blurRadius: 10,
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: compact ? 36 : 46,
+                    height: compact ? 36 : 46,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          mode.color.withValues(alpha: 0.42),
+                          const Color(0xff071016),
+                        ],
+                      ),
+                      border: Border.all(color: mode.color, width: 2),
+                    ),
+                    child: Icon(
+                      mode.icon,
+                      color: mode.color,
+                      size: compact ? 21 : 26,
+                    ),
+                  ),
+                  SizedBox(width: compact ? 8 : 10),
+                  Expanded(
+                    child: Text(
+                      mode.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: compact ? 15 : 18,
+                        fontWeight: FontWeight.w900,
+                        height: 0.92,
+                        shadows: const [
+                          Shadow(color: Colors.black, offset: Offset(1.5, 1.5)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Positioned(
+                right: -12,
+                top: -14,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xffffd64c),
+                    border: Border.all(
+                      color: const Color(0xff182035),
+                      width: 3,
+                    ),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0xaa000000), blurRadius: 8),
+                    ],
+                  ),
+                  child: Center(
+                    child: Text(
+                      mode.badge,
+                      style: const TextStyle(
+                        color: Color(0xff182035),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeBottomDock extends StatelessWidget {
+  const _HomeBottomDock({
+    required this.onStore,
+    required this.onSetup,
+    required this.onAvatars,
+    required this.onMissions,
+    this.compact = false,
+  });
+
+  final VoidCallback onStore;
+  final VoidCallback onSetup;
+  final VoidCallback onAvatars;
+  final VoidCallback onMissions;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final nav = [
+      _MenuButton(
+        icon: Icons.storefront_rounded,
+        label: 'STORE',
+        onPressed: onStore,
+      ),
+      _MenuButton(icon: Icons.tune_rounded, label: 'SETUP', onPressed: onSetup),
+      _MenuButton(
+        icon: Icons.diversity_3_rounded,
+        label: 'AVATARS',
+        onPressed: onAvatars,
+      ),
+      _MenuButton(
+        icon: Icons.assignment_rounded,
+        label: 'MISSIONS',
+        onPressed: onMissions,
+      ),
+    ];
+
+    if (compact) {
+      return Row(
+        children: [
+          Expanded(
+            child: _MiniDockButton(
+              icon: Icons.storefront_rounded,
+              label: 'STORE',
+              onPressed: onStore,
+            ),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: _MiniDockButton(
+              icon: Icons.tune_rounded,
+              label: 'SETUP',
+              onPressed: onSetup,
+            ),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: _MiniDockButton(
+              icon: Icons.diversity_3_rounded,
+              label: 'AVATARS',
+              onPressed: onAvatars,
+            ),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: _MiniDockButton(
+              icon: Icons.assignment_rounded,
+              label: 'MISSIONS',
+              onPressed: onMissions,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        nav[0],
+        const SizedBox(width: 8),
+        nav[1],
+        const SizedBox(width: 8),
+        nav[2],
+        const SizedBox(width: 8),
+        nav[3],
+      ],
+    );
+  }
+}
+
+class _MiniDockButton extends StatelessWidget {
+  const _MiniDockButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 82,
+      child: FilledButton(
+        style: FilledButton.styleFrom(
+          padding: EdgeInsets.zero,
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: onPressed,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xff303940), Color(0xff080c10)],
+            ),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xff7c8992), width: 2),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0xaa000000),
+                blurRadius: 12,
+                offset: Offset(0, 7),
+              ),
+            ],
+          ),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 42,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: const Color(0xff39d9ff).withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: const Color(0xff39d9ff).withValues(alpha: 0.45),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Icon(icon, color: const Color(0xff39d9ff), size: 25),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0,
+                    shadows: [
+                      Shadow(color: Colors.black, offset: Offset(1, 1)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PrimaryPlayButton extends StatelessWidget {
+  const _PrimaryPlayButton({
+    required this.onPressed,
+    this.compact = false,
+    this.height,
+  });
+
+  final VoidCallback onPressed;
+  final bool compact;
+  final double? height;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: compact ? double.infinity : 252,
+      height: height ?? (compact ? 82 : 76),
+      child: FilledButton(
+        style: FilledButton.styleFrom(
+          padding: EdgeInsets.zero,
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: onPressed,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xfffff06a), Color(0xffff9d16)],
+            ),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white, width: 3),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0xcc000000),
+                blurRadius: 20,
+                offset: Offset(0, 10),
+              ),
+              BoxShadow(
+                color: Color(0x88ffdd35),
+                blurRadius: 18,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.directions_run_rounded,
+                    color: Color(0xff182035),
+                    size: 42,
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'PLAY',
+                    style: TextStyle(
+                      color: const Color(0xff182035),
+                      fontSize: compact ? 43 : 30,
+                      height: 0.9,
+                      fontWeight: FontWeight.w900,
+                      shadows: const [
+                        Shadow(color: Colors.white, offset: Offset(1.5, 1.5)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xff332310).withValues(alpha: 0.86),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: const Text(
+                  'QUICK MATCH',
+                  style: TextStyle(
+                    color: Color(0xffffd64c),
+                    fontSize: 15,
+                    height: 1,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StoreHeader extends StatelessWidget {
+  const _StoreHeader({
+    required this.coins,
+    required this.onBack,
+    this.compact = false,
+  });
+
+  final int coins;
+  final VoidCallback onBack;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _RoundIconButton(
+          icon: Icons.home_rounded,
+          tooltip: 'Home',
+          onPressed: onBack,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            height: compact ? 58 : 66,
+            padding: const EdgeInsets.symmetric(horizontal: 15),
+            decoration: _arcadePlate(borderColor: const Color(0xffffd64c)),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.storefront_rounded,
+                    color: Color(0xffffd64c),
+                    size: 28,
+                  ),
+                  const SizedBox(width: 9),
+                  Text(
+                    compact ? 'STORE' : 'RUNNER STORE',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 30,
+                      fontWeight: FontWeight.w900,
+                      shadows: [
+                        Shadow(color: Colors.black, offset: Offset(2, 2)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        _CoinStrip(coins: coins, large: !compact),
+      ],
+    );
+  }
+}
+
+class _StoreFeaturePanel extends StatelessWidget {
+  const _StoreFeaturePanel({required this.skin, required this.image});
+
+  final _StoreSkin skin;
+  final ui.Image? image;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _arcadePlate(borderColor: skin.color),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text(
+            'SELECTED RUNNER',
+            style: TextStyle(
+              color: Color(0xffffd64c),
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _SkinPortrait(image: image, color: skin.color, size: 170, hero: true),
+          const SizedBox(height: 12),
+          Text(
+            skin.name,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              shadows: [Shadow(color: Colors.black, offset: Offset(2, 2))],
+            ),
+          ),
+          const SizedBox(height: 10),
+          const _MiniProgress(label: 'Sprint Style', value: 0.82, text: '82%'),
+          const SizedBox(height: 8),
+          const _MiniProgress(label: 'Tag Flair', value: 0.68, text: '68%'),
+        ],
+      ),
+    );
+  }
+}
+
+class _StoreGrid extends StatelessWidget {
+  const _StoreGrid({
+    required this.coins,
+    required this.selectedAvatar,
+    required this.unlockedAvatars,
+    required this.avatars,
+    required this.onSelect,
+    this.compact = false,
+  });
+
+  final int coins;
+  final PlayerAvatar selectedAvatar;
+  final Set<PlayerAvatar> unlockedAvatars;
+  final Map<PlayerAvatar, ui.Image> avatars;
+  final ValueChanged<_StoreSkin> onSelect;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: _arcadePlate(borderColor: const Color(0xff617380)),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final columns = compact || constraints.maxWidth < 600 ? 2 : 3;
+          final spacing = compact ? 8.0 : 10.0;
+          final width =
+              (constraints.maxWidth - spacing * (columns - 1)) / columns;
+          return SingleChildScrollView(
+            child: Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (final skin in _storeSkins)
+                  SizedBox(
+                    width: width,
+                    child: _StoreSkinCard(
+                      skin: skin,
+                      image: avatars[skin.avatar],
+                      coins: coins,
+                      selected: selectedAvatar == skin.avatar,
+                      unlocked: unlockedAvatars.contains(skin.avatar),
+                      onTap: () => onSelect(skin),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RoundIconButton extends StatelessWidget {
+  const _RoundIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    this.compact = false,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: Container(
+            width: compact ? 44 : 52,
+            height: compact ? 44 : 52,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xee242d35), Color(0xee05080b)],
+              ),
+              border: Border.all(color: Colors.white70, width: 2),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x99000000),
+                  blurRadius: 14,
+                  offset: Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: Colors.white, size: compact ? 22 : 25),
           ),
         ),
       ),
@@ -955,76 +3200,141 @@ class _StoreSkinCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final canBuy = coins >= skin.price;
     final actionText = selected
-        ? 'Selected'
+        ? 'SELECTED'
         : unlocked
-        ? 'Select'
+        ? 'SELECT'
         : canBuy
         ? '${skin.price}'
         : '${skin.price}';
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: selected ? null : onTap,
         child: Container(
-          height: 172,
+          height: 184,
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: selected
-                ? skin.color.withValues(alpha: 0.24)
-                : const Color(0xff182035).withValues(alpha: 0.08),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: selected
+                  ? [
+                      skin.color.withValues(alpha: 0.56),
+                      const Color(0xee10171d),
+                    ]
+                  : [const Color(0xee26323a), const Color(0xee0a0f14)],
+            ),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: selected
                   ? skin.color
-                  : const Color(0xff182035).withValues(alpha: 0.18),
+                  : Colors.white.withValues(alpha: 0.2),
               width: selected ? 3 : 2,
             ),
+            boxShadow: [
+              if (selected)
+                BoxShadow(
+                  color: skin.color.withValues(alpha: 0.38),
+                  blurRadius: 18,
+                ),
+              const BoxShadow(
+                color: Color(0x77000000),
+                blurRadius: 10,
+                offset: Offset(0, 6),
+              ),
+            ],
           ),
           child: Column(
             children: [
-              _SkinPortrait(image: image, color: skin.color, size: 82),
-              const SizedBox(height: 6),
-              Text(
-                skin.name,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xff182035),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w900,
+              Align(
+                alignment: Alignment.topRight,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? const Color(0xffffd64c)
+                        : unlocked
+                        ? const Color(0xff39d9ff)
+                        : Colors.black.withValues(alpha: 0.48),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: Text(
+                    selected
+                        ? 'ON'
+                        : unlocked
+                        ? 'OWNED'
+                        : 'LOCKED',
+                    style: TextStyle(
+                      color: selected ? const Color(0xff182035) : Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
               ),
-              const Spacer(),
+              Expanded(
+                child: Center(
+                  child: _SkinPortrait(
+                    image: image,
+                    color: skin.color,
+                    size: 92,
+                    showBadge: false,
+                  ),
+                ),
+              ),
+              Text(
+                skin.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                  shadows: [Shadow(color: Colors.black, offset: Offset(1, 1))],
+                ),
+              ),
+              const SizedBox(height: 7),
               Container(
-                height: 30,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+                height: 32,
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 decoration: BoxDecoration(
-                  color: selected
-                      ? const Color(0xff182035)
-                      : unlocked || canBuy
-                      ? skin.color
-                      : const Color(0xff68717b),
-                  borderRadius: BorderRadius.circular(99),
+                  gradient: LinearGradient(
+                    colors: selected
+                        ? const [Color(0xffffed61), Color(0xffffa229)]
+                        : unlocked || canBuy
+                        ? [skin.color, skin.color.withValues(alpha: 0.68)]
+                        : const [Color(0xff747b82), Color(0xff444b52)],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white38, width: 1.5),
                 ),
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (!unlocked) ...[
-                      const Icon(
-                        Icons.stars_rounded,
-                        size: 17,
-                        color: Colors.white,
-                      ),
-                      const SizedBox(width: 4),
-                    ],
+                    Icon(
+                      unlocked
+                          ? Icons.check_circle_rounded
+                          : Icons.stars_rounded,
+                      size: 17,
+                      color: selected ? const Color(0xff182035) : Colors.white,
+                    ),
+                    const SizedBox(width: 5),
                     Flexible(
                       child: Text(
                         actionText,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
+                        style: TextStyle(
+                          color: selected
+                              ? const Color(0xff182035)
+                              : Colors.white,
+                          fontSize: 12,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -1045,53 +3355,117 @@ class _SkinPortrait extends StatelessWidget {
     required this.image,
     required this.color,
     required this.size,
+    this.hero = false,
+    this.showBadge = true,
   });
 
   final ui.Image? image;
   final Color color;
   final double size;
+  final bool hero;
+  final bool showBadge;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color.withValues(alpha: 0.18),
-        border: Border.all(color: color, width: 3),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    color.withValues(alpha: hero ? 0.46 : 0.26),
+                    const Color(0xff0b1116).withValues(alpha: 0.92),
+                  ],
+                ),
+                border: Border.all(color: color, width: hero ? 5 : 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: hero ? 0.48 : 0.28),
+                    blurRadius: hero ? 28 : 12,
+                  ),
+                  const BoxShadow(
+                    color: Color(0xaa000000),
+                    blurRadius: 14,
+                    offset: Offset(0, 8),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: ClipOval(
+              child: Padding(
+                padding: EdgeInsets.all(hero ? 6 : 3),
+                child: image == null
+                    ? Icon(Icons.person_rounded, color: color, size: size * 0.5)
+                    : RawImage(image: image, fit: BoxFit.contain),
+              ),
+            ),
+          ),
+          if (showBadge)
+            Positioned(
+              right: hero ? 10 : -2,
+              bottom: hero ? 12 : -2,
+              child: Container(
+                width: hero ? 42 : 27,
+                height: hero ? 42 : 27,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xffffd64c),
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0xaa000000), blurRadius: 8),
+                  ],
+                ),
+                child: Icon(
+                  Icons.directions_run_rounded,
+                  size: hero ? 25 : 16,
+                  color: const Color(0xff182035),
+                ),
+              ),
+            ),
+        ],
       ),
-      child: image == null
-          ? Icon(Icons.person_rounded, color: color, size: size * 0.5)
-          : RawImage(image: image, fit: BoxFit.contain),
     );
   }
 }
 
 class _CoinStrip extends StatelessWidget {
-  const _CoinStrip({required this.coins});
+  const _CoinStrip({required this.coins, this.large = false});
 
   final int coins;
+  final bool large;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: const Color(0xff182035),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: const Color(0xffffd64c), width: 2),
-      ),
+      height: large ? 52 : 44,
+      padding: EdgeInsets.symmetric(horizontal: large ? 14 : 11),
+      decoration: _arcadePlate(borderColor: const Color(0xffffd64c)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.stars_rounded, color: Color(0xffffd64c), size: 19),
-          const SizedBox(width: 6),
+          Icon(
+            Icons.stars_rounded,
+            color: const Color(0xffffd64c),
+            size: large ? 24 : 20,
+          ),
+          const SizedBox(width: 7),
           Text(
             coins.toString(),
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white,
+              fontSize: large ? 20 : 16,
               fontWeight: FontWeight.w900,
+              shadows: const [
+                Shadow(color: Colors.black, offset: Offset(1, 1)),
+              ],
             ),
           ),
         ],
@@ -1113,15 +3487,37 @@ class _MenuButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xff182035),
-        side: const BorderSide(color: Color(0xff182035), width: 2),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    return SizedBox(
+      width: 112,
+      height: 52,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: const Color(0xee10171d),
+          side: const BorderSide(color: Color(0xff6f7f89), width: 2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+        ),
+        onPressed: onPressed,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: const Color(0xff39d9ff), size: 20),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-      onPressed: onPressed,
-      icon: Icon(icon),
-      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
     );
   }
 }
@@ -1131,6 +3527,36 @@ _StoreSkin _skinForAvatar(PlayerAvatar avatar) {
     (skin) => skin.avatar == avatar,
     orElse: () => _storeSkins.first,
   );
+}
+
+_ArenaOption _arenaOptionFor(ArenaBackground arena) {
+  return _arenaOptions.firstWhere(
+    (option) => option.arena == arena,
+    orElse: () => _arenaOptions.first,
+  );
+}
+
+String _arenaAssetPath(ArenaBackground arena) {
+  return switch (arena) {
+    ArenaBackground.base => 'assets/backgrounds/playground_base.png',
+    ArenaBackground.bellZone => 'assets/backgrounds/playground_bell_zone.png',
+    ArenaBackground.shrinkingYard =>
+      'assets/backgrounds/playground_shrinking_yard.png',
+    ArenaBackground.frenzy => 'assets/backgrounds/playground_frenzy.png',
+  };
+}
+
+String _formatNumber(int value) {
+  final digits = value.toString();
+  final buffer = StringBuffer();
+  for (var index = 0; index < digits.length; index += 1) {
+    final remaining = digits.length - index;
+    if (index > 0 && remaining % 3 == 0) {
+      buffer.write(',');
+    }
+    buffer.write(digits[index]);
+  }
+  return buffer.toString();
 }
 
 class _GameHud extends StatelessWidget {
@@ -1149,44 +3575,69 @@ class _GameHud extends StatelessWidget {
     );
 
     return SafeArea(
-      child: IgnorePointer(
-        child: Stack(
-          children: [
-            Positioned(
-              left: 12,
-              top: 10,
-              child: _ModeBanner(title: _modeTitle(simulation)),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 520;
+          return IgnorePointer(
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 12,
+                  top: 10,
+                  child: _ModeBanner(
+                    title: _modeTitle(simulation),
+                    compact: compact,
+                  ),
+                ),
+                Positioned(
+                  right: 12,
+                  top: 10,
+                  child: Row(
+                    children: [
+                      _TimerPlate(text: timerText, compact: compact),
+                      SizedBox(width: compact ? 6 : 8),
+                      _TagsPlate(
+                        value: totalTags,
+                        target: 15,
+                        compact: compact,
+                      ),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: compact ? 12 : 18,
+                  top: compact ? 84 : 92,
+                  child: _RosterStack(
+                    players: simulation.players.take(compact ? 3 : 4).toList(),
+                    compact: compact,
+                  ),
+                ),
+                Positioned(
+                  top: compact ? 74 : 78,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: _EventBanner(
+                      simulation: simulation,
+                      compact: compact,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: compact ? 148 : 28,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: _ObjectiveToast(
+                      simulation: simulation,
+                      compact: compact,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            Positioned(
-              right: 12,
-              top: 10,
-              child: Row(
-                children: [
-                  _TimerPlate(text: timerText),
-                  const SizedBox(width: 8),
-                  _TagsPlate(value: totalTags, target: 15),
-                ],
-              ),
-            ),
-            Positioned(
-              left: 18,
-              top: 92,
-              child: _RosterStack(players: simulation.players.take(4).toList()),
-            ),
-            Positioned(
-              top: 78,
-              left: 0,
-              right: 0,
-              child: Center(child: _EventBanner(simulation: simulation)),
-            ),
-            Positioned(
-              bottom: 28,
-              left: 0,
-              right: 0,
-              child: Center(child: _ObjectiveToast(simulation: simulation)),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -1206,16 +3657,17 @@ class _GameHud extends StatelessWidget {
 }
 
 class _ModeBanner extends StatelessWidget {
-  const _ModeBanner({required this.title});
+  const _ModeBanner({required this.title, this.compact = false});
 
   final String title;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 206,
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      width: compact ? 168 : 206,
+      height: compact ? 52 : 56,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
       decoration: _arcadePlate(
         borderColor: const Color(0xff607080),
         shadowColor: Colors.black.withValues(alpha: 0.42),
@@ -1241,26 +3693,31 @@ class _ModeBanner extends StatelessWidget {
 }
 
 class _TimerPlate extends StatelessWidget {
-  const _TimerPlate({required this.text});
+  const _TimerPlate({required this.text, this.compact = false});
 
   final String text;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 50,
-      padding: const EdgeInsets.symmetric(horizontal: 13),
+      height: compact ? 48 : 50,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 9 : 13),
       decoration: _arcadePlate(borderColor: const Color(0xff657480)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.timer_outlined, color: Colors.white, size: 25),
-          const SizedBox(width: 7),
+          Icon(
+            Icons.timer_outlined,
+            color: Colors.white,
+            size: compact ? 21 : 25,
+          ),
+          SizedBox(width: compact ? 5 : 7),
           Text(
             text,
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white,
-              fontSize: 20,
+              fontSize: compact ? 17 : 20,
               fontWeight: FontWeight.w900,
               letterSpacing: 0,
             ),
@@ -1272,16 +3729,21 @@ class _TimerPlate extends StatelessWidget {
 }
 
 class _TagsPlate extends StatelessWidget {
-  const _TagsPlate({required this.value, required this.target});
+  const _TagsPlate({
+    required this.value,
+    required this.target,
+    this.compact = false,
+  });
 
   final int value;
   final int target;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 72,
-      height: 56,
+      width: compact ? 62 : 72,
+      height: compact ? 52 : 56,
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       decoration: _arcadePlate(borderColor: const Color(0xff657480)),
       child: FittedBox(
@@ -1328,17 +3790,18 @@ class _TagsPlate extends StatelessWidget {
 }
 
 class _RosterStack extends StatelessWidget {
-  const _RosterStack({required this.players});
+  const _RosterStack({required this.players, this.compact = false});
 
   final List<PlayerState> players;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         for (final player in players) ...[
-          _RosterRow(player: player),
-          const SizedBox(height: 8),
+          _RosterRow(player: player, compact: compact),
+          SizedBox(height: compact ? 6 : 8),
         ],
       ],
     );
@@ -1346,9 +3809,10 @@ class _RosterStack extends StatelessWidget {
 }
 
 class _RosterRow extends StatelessWidget {
-  const _RosterRow({required this.player});
+  const _RosterRow({required this.player, this.compact = false});
 
   final PlayerState player;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1358,8 +3822,8 @@ class _RosterRow extends StatelessWidget {
         ? const Color(0xffffc845)
         : const Color(0xff26c9ff);
     return Container(
-      width: 128,
-      height: 48,
+      width: compact ? 118 : 128,
+      height: compact ? 44 : 48,
       padding: const EdgeInsets.fromLTRB(5, 4, 8, 4),
       decoration: _arcadePlate(
         borderColor: player.isIt
@@ -1370,8 +3834,8 @@ class _RosterRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _AvatarDot(player: player, size: 39),
-          const SizedBox(width: 7),
+          _AvatarDot(player: player, size: compact ? 35 : 39),
+          SizedBox(width: compact ? 6 : 7),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -1476,9 +3940,10 @@ class _AvatarDot extends StatelessWidget {
 }
 
 class _EventBanner extends StatelessWidget {
-  const _EventBanner({required this.simulation});
+  const _EventBanner({required this.simulation, this.compact = false});
 
   final PlaygroundBlitzSimulation simulation;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1488,6 +3953,7 @@ class _EventBanner extends StatelessWidget {
         label: 'FRENZY',
         value: _countdown(simulation.timer),
         color: const Color(0xffff7a1a),
+        compact: compact,
       );
     }
     if (simulation.shrinkProgress > 0.42) {
@@ -1497,6 +3963,7 @@ class _EventBanner extends StatelessWidget {
         label: 'YARD CLOSING',
         value: seconds.toString(),
         color: const Color(0xffff405f),
+        compact: compact,
       );
     }
     if (simulation.bellZone.active) {
@@ -1505,6 +3972,7 @@ class _EventBanner extends StatelessWidget {
         label: 'Bell Zone',
         value: simulation.bellZone.timeLeft.ceil().toString().padLeft(2, '0'),
         color: const Color(0xff9d55ff),
+        compact: compact,
       );
     }
     return const SizedBox.shrink();
@@ -1522,70 +3990,116 @@ class _CenterEventPlate extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    this.compact = false,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final Color color;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final iconColor = color == const Color(0xff9d55ff)
+        ? const Color(0xffffd64c)
+        : color == const Color(0xffff405f)
+        ? const Color(0xffffd64c)
+        : color;
     return Container(
-      height: 78,
-      constraints: const BoxConstraints(minWidth: 168, maxWidth: 260),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+      height: compact ? 46 : 66,
+      constraints: BoxConstraints(
+        minWidth: compact ? 150 : 190,
+        maxWidth: compact ? 184 : 240,
+      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 14,
+        vertical: compact ? 6 : 8,
+      ),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            color.withValues(alpha: 0.88),
-            const Color(0xff171923).withValues(alpha: 0.95),
-          ],
+          colors: [Color(0xf0212833), Color(0xf0060a10)],
         ),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.96), width: 3),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: color.withValues(alpha: 0.88),
+          width: compact ? 2 : 3,
+        ),
         boxShadow: [
-          BoxShadow(color: color.withValues(alpha: 0.64), blurRadius: 24),
-          const BoxShadow(
-            color: Color(0x99000000),
-            blurRadius: 18,
-            offset: Offset(0, 9),
+          BoxShadow(
+            color: color.withValues(alpha: compact ? 0.22 : 0.34),
+            blurRadius: compact ? 12 : 18,
+          ),
+          BoxShadow(
+            color: const Color(0x99000000),
+            blurRadius: compact ? 10 : 16,
+            offset: Offset(0, compact ? 5 : 8),
           ),
         ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: const Color(0xffffd64c), size: 34),
-          const SizedBox(width: 12),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: color == const Color(0xffff405f)
-                      ? const Color(0xffffcfd5)
-                      : const Color(0xffffd64c),
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
-                ),
+          Container(
+            width: compact ? 31 : 40,
+            height: compact ? 31 : 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.18),
+              border: Border.all(
+                color: color.withValues(alpha: 0.82),
+                width: 2,
               ),
-              Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 34,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
-                  shadows: [Shadow(color: Colors.black, offset: Offset(2, 2))],
-                ),
+            ),
+            child: Icon(icon, color: iconColor, size: compact ? 19 : 25),
+          ),
+          SizedBox(width: compact ? 7 : 10),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: compact ? 13 : 17,
+                fontWeight: FontWeight.w900,
+                height: 1,
+                shadows: const [
+                  Shadow(color: Colors.black, offset: Offset(1, 1)),
+                ],
               ),
-            ],
+            ),
+          ),
+          SizedBox(width: compact ? 7 : 10),
+          Container(
+            constraints: BoxConstraints(minWidth: compact ? 42 : 58),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 7 : 10,
+              vertical: compact ? 4 : 5,
+            ),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.24),
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(
+                color: color.withValues(alpha: 0.82),
+                width: 2,
+              ),
+            ),
+            child: Text(
+              value,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: compact ? 20 : 28,
+                fontWeight: FontWeight.w900,
+                height: 1,
+                shadows: const [
+                  Shadow(color: Colors.black, offset: Offset(1.5, 1.5)),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -1594,9 +4108,10 @@ class _CenterEventPlate extends StatelessWidget {
 }
 
 class _ObjectiveToast extends StatelessWidget {
-  const _ObjectiveToast({required this.simulation});
+  const _ObjectiveToast({required this.simulation, this.compact = false});
 
   final PlaygroundBlitzSimulation simulation;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1622,22 +4137,25 @@ class _ObjectiveToast extends StatelessWidget {
         ? 'to earn points!'
         : 'Low stamina = slower!';
     return Container(
-      constraints: const BoxConstraints(maxWidth: 360),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      constraints: BoxConstraints(maxWidth: compact ? 250 : 360),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 16,
+        vertical: compact ? 8 : 10,
+      ),
       decoration: _arcadePlate(borderColor: const Color(0xff657480)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: const Color(0xffffd64c), size: 28),
-          const SizedBox(width: 10),
+          Icon(icon, color: const Color(0xffffd64c), size: compact ? 22 : 28),
+          SizedBox(width: compact ? 8 : 10),
           Flexible(
             child: RichText(
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               text: TextSpan(
-                style: const TextStyle(
+                style: TextStyle(
                   color: Colors.white,
-                  fontSize: 16,
+                  fontSize: compact ? 13 : 16,
                   fontWeight: FontWeight.w800,
                   height: 1.1,
                 ),
@@ -1682,30 +4200,42 @@ class _ControlsOverlay extends StatelessWidget {
         ? 1.0
         : (1 - human.dashCooldown / 3.8).clamp(0.0, 1.0).toDouble();
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 14, 24, 24),
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              _Joystick(
-                stickOffset: stickOffset,
-                onChanged: onStickChanged,
-                onReleased: onStickReleased,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 520;
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 20 : 24,
+              14,
+              compact ? 20 : 24,
+              compact ? 18 : 24,
+            ),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _Joystick(
+                    stickOffset: stickOffset,
+                    size: compact ? 112 : 126,
+                    onChanged: onStickChanged,
+                    onReleased: onStickReleased,
+                  ),
+                  const Spacer(),
+                  _ShoeDashButton(
+                    cooldownText: human.dashCooldown <= 0
+                        ? 'DASH'
+                        : '${human.dashCooldown.toStringAsFixed(1)}s',
+                    enabled: human.dashCooldown <= 0 && human.stamina >= 18,
+                    progress: cooldownProgress,
+                    size: compact ? 108 : 118,
+                    onPressed: onDash,
+                  ),
+                ],
               ),
-              const Spacer(),
-              _ShoeDashButton(
-                cooldownText: human.dashCooldown <= 0
-                    ? 'DASH'
-                    : '${human.dashCooldown.toStringAsFixed(1)}s',
-                enabled: human.dashCooldown <= 0 && human.stamina >= 18,
-                progress: cooldownProgress,
-                onPressed: onDash,
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -1714,19 +4244,24 @@ class _ControlsOverlay extends StatelessWidget {
 class _Joystick extends StatelessWidget {
   const _Joystick({
     required this.stickOffset,
+    required this.size,
     required this.onChanged,
     required this.onReleased,
   });
 
   final Offset stickOffset;
+  final double size;
   final void Function(Offset localPosition, Size size) onChanged;
   final VoidCallback onReleased;
 
   @override
   Widget build(BuildContext context) {
+    final innerSize = size * 0.67;
+    final knobSize = size * 0.38;
+    final knobBase = (size - knobSize) / 2;
     return SizedBox(
-      width: 126,
-      height: 126,
+      width: size,
+      height: size,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final size = Size(constraints.maxWidth, constraints.maxHeight);
@@ -1755,8 +4290,8 @@ class _Joystick extends StatelessWidget {
                 children: [
                   Center(
                     child: Container(
-                      width: 84,
-                      height: 84,
+                      width: innerSize,
+                      height: innerSize,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
@@ -1767,11 +4302,11 @@ class _Joystick extends StatelessWidget {
                     ),
                   ),
                   Positioned(
-                    left: 39 + stickOffset.dx,
-                    top: 39 + stickOffset.dy,
+                    left: knobBase + stickOffset.dx,
+                    top: knobBase + stickOffset.dy,
                     child: Container(
-                      width: 48,
-                      height: 48,
+                      width: knobSize,
+                      height: knobSize,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: const RadialGradient(
@@ -1802,12 +4337,14 @@ class _ShoeDashButton extends StatelessWidget {
     required this.cooldownText,
     required this.enabled,
     required this.progress,
+    required this.size,
     required this.onPressed,
   });
 
   final String cooldownText;
   final bool enabled;
   final double progress;
+  final double size;
   final VoidCallback onPressed;
 
   @override
@@ -1818,21 +4355,21 @@ class _ShoeDashButton extends StatelessWidget {
         opacity: enabled ? 1 : 0.5,
         duration: const Duration(milliseconds: 120),
         child: SizedBox(
-          width: 118,
-          height: 118,
+          width: size,
+          height: size,
           child: Stack(
             alignment: Alignment.center,
             children: [
               CustomPaint(
-                size: const Size.square(118),
+                size: Size.square(size),
                 painter: _CooldownRingPainter(
                   progress: progress,
                   enabled: enabled,
                 ),
               ),
               Container(
-                width: 96,
-                height: 96,
+                width: size * 0.81,
+                height: size * 0.81,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
@@ -1855,19 +4392,19 @@ class _ShoeDashButton extends StatelessWidget {
               ),
               Transform.rotate(
                 angle: -0.35,
-                child: const Icon(
+                child: Icon(
                   Icons.directions_run_rounded,
-                  size: 48,
+                  size: size * 0.41,
                   color: Colors.white,
                 ),
               ),
               Positioned(
-                bottom: 14,
+                bottom: size * 0.12,
                 child: Text(
                   cooldownText,
                   style: TextStyle(
                     color: enabled ? Colors.white : Colors.white70,
-                    fontSize: 15,
+                    fontSize: size < 112 ? 13 : 15,
                     fontWeight: FontWeight.w900,
                     shadows: const [
                       Shadow(color: Colors.black, offset: Offset(2, 2)),

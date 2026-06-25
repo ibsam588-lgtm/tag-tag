@@ -67,7 +67,7 @@ class PlayerState {
 }
 
 class BellZone {
-  Offset center = const Offset(620, 390);
+  Offset center = const Offset(380, 600);
   double radius = 92;
   bool active = false;
   double timeLeft = 0;
@@ -115,9 +115,9 @@ class PlaygroundBlitzSimulation {
     : timer = settings.roundLength,
       players = _createPlayers(settings);
 
-  static const Size worldSize = Size(1200, 760);
-  static const Rect startYard = Rect.fromLTWH(64, 64, 1072, 632);
-  static const Rect finalYard = Rect.fromLTWH(188, 132, 824, 496);
+  static const Size worldSize = Size(760, 1200);
+  static const Rect startYard = Rect.fromLTWH(64, 64, 632, 1072);
+  static const Rect finalYard = Rect.fromLTWH(132, 188, 496, 824);
   static const double playerRadius = 18;
   static const double tagRadius = 42;
 
@@ -125,32 +125,32 @@ class PlaygroundBlitzSimulation {
     ArenaObstacle(
       'slide',
       ObstacleKind.slide,
-      Rect.fromLTWH(170, 145, 130, 78),
+      Rect.fromLTWH(112, 154, 128, 82),
     ),
     ArenaObstacle(
       'monkey-bars',
       ObstacleKind.fence,
-      Rect.fromLTWH(508, 126, 156, 58),
+      Rect.fromLTWH(306, 154, 150, 60),
     ),
     ArenaObstacle(
       'bench-left',
       ObstacleKind.bench,
-      Rect.fromLTWH(128, 500, 150, 38),
+      Rect.fromLTWH(110, 780, 148, 40),
     ),
     ArenaObstacle(
       'bench-right',
       ObstacleKind.bench,
-      Rect.fromLTWH(887, 508, 148, 38),
+      Rect.fromLTWH(500, 834, 148, 40),
     ),
     ArenaObstacle(
       'hopscotch',
       ObstacleKind.chalk,
-      Rect.fromLTWH(520, 500, 116, 112),
+      Rect.fromLTWH(318, 760, 116, 112),
     ),
     ArenaObstacle(
       'cone-row',
       ObstacleKind.cones,
-      Rect.fromLTWH(780, 220, 54, 236),
+      Rect.fromLTWH(560, 414, 54, 236),
     ),
   ];
 
@@ -234,7 +234,7 @@ class PlaygroundBlitzSimulation {
       _frenzyCelebrated = true;
       floatingTexts.add(
         FloatingText(
-          position: const Offset(600, 145),
+          position: const Offset(380, 188),
           text: 'FRENZY!',
           color: const Color(0xffff3f68),
           ttl: 1.05,
@@ -255,14 +255,14 @@ class PlaygroundBlitzSimulation {
 
   static List<PlayerState> _createPlayers(GameSettings settings) {
     const starts = [
-      Offset(380, 360),
-      Offset(780, 360),
-      Offset(310, 570),
-      Offset(900, 560),
-      Offset(276, 268),
-      Offset(920, 260),
-      Offset(585, 612),
-      Offset(612, 210),
+      Offset(380, 650),
+      Offset(382, 420),
+      Offset(250, 700),
+      Offset(510, 720),
+      Offset(222, 520),
+      Offset(540, 520),
+      Offset(312, 890),
+      Offset(448, 310),
     ];
     const botNames = ['Zay', 'Mina', 'Rafi', 'June', 'Niko', 'Paz', 'Lena'];
     const colors = [
@@ -477,7 +477,7 @@ class PlaygroundBlitzSimulation {
       );
     }
 
-    const center = Offset(600, 380);
+    const center = Offset(380, 600);
     final orbit = _normalized(
       Offset(center.dy - player.position.dy, -(center.dx - player.position.dx)),
     );
