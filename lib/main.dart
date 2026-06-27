@@ -12,7 +12,43 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'game_painter.dart';
 import 'game_simulation.dart';
 
-enum _ShellScreen { home, game, setup, store, arenas, tutorial }
+enum _ShellScreen { home, game, setup, store, arenas, tutorial, missions }
+
+enum _TutorialStep { move, dash, pickup, bounty, complete }
+
+extension _TutorialStepCopy on _TutorialStep {
+  String get title {
+    return switch (this) {
+      _TutorialStep.move => 'Move To Survive',
+      _TutorialStep.dash => 'Dash Out',
+      _TutorialStep.pickup => 'Grab A Power-Up',
+      _TutorialStep.bounty => 'Tag The Crown',
+      _TutorialStep.complete => 'Ready For The Yard',
+    };
+  }
+
+  String get body {
+    return switch (this) {
+      _TutorialStep.move => 'Drag the joystick until the meter fills.',
+      _TutorialStep.dash => 'Tap the shoe button to burst away.',
+      _TutorialStep.pickup => 'Run into the glowing pickup for a bonus.',
+      _TutorialStep.bounty =>
+        'You are IT. Tag the crown runner for big points.',
+      _TutorialStep.complete =>
+        'You learned movement, dash, pickups, and bounty tags.',
+    };
+  }
+
+  IconData get icon {
+    return switch (this) {
+      _TutorialStep.move => Icons.touch_app_rounded,
+      _TutorialStep.dash => Icons.directions_run_rounded,
+      _TutorialStep.pickup => Icons.bolt_rounded,
+      _TutorialStep.bounty => Icons.emoji_events_rounded,
+      _TutorialStep.complete => Icons.check_circle_rounded,
+    };
+  }
+}
 
 class _StoreSkin {
   const _StoreSkin({
@@ -42,6 +78,33 @@ class _ArenaOption {
   final String detail;
   final IconData icon;
   final Color color;
+}
+
+class _MissionProgress {
+  const _MissionProgress({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.icon,
+    required this.color,
+    required this.progress,
+    required this.target,
+    required this.reward,
+    required this.claimed,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final IconData icon;
+  final Color color;
+  final int progress;
+  final int target;
+  final int reward;
+  final bool claimed;
+
+  bool get complete => progress >= target;
+  double get fraction => (progress / target).clamp(0.0, 1.0).toDouble();
 }
 
 const _storeSkins = [
@@ -175,11 +238,27 @@ class _GameShellState extends State<GameShell>
   int _lastReward = 0;
   bool _roundRewardGranted = false;
   bool _darkMode = false;
+  DateTime? _lastDailyRewardClaimedAt;
+  int _dailyRewardStreak = 0;
+  int _dailyRewardClaims = 0;
+  int _roundsPlayed = 0;
+  int _totalTags = 0;
+  int _bellZoneRounds = 0;
+  int _shrinkingYardRounds = 0;
+  int _tagFrenzyTags = 0;
+  Set<String> _claimedMissions = {};
   PlayerAvatar _selectedAvatar = PlayerAvatar.blue;
   ArenaBackground _selectedArena = ArenaBackground.base;
   Set<PlayerAvatar> _unlockedAvatars = {PlayerAvatar.blue};
   Offset _stickOffset = Offset.zero;
   double _animationSeconds = 0;
+  bool _tutorialActive = false;
+  bool _tutorialDashPressed = false;
+  _TutorialStep _tutorialStep = _TutorialStep.move;
+  double _tutorialProgress = 0;
+  int? _tutorialPickupId;
+  int _tutorialStartTags = 0;
+  Offset _tutorialMoveStart = Offset.zero;
 
   @override
   void initState() {
@@ -258,6 +337,8 @@ class _GameShellState extends State<GameShell>
     final selectedName = prefs.getString('selected_avatar');
     final selectedArenaName = prefs.getString('selected_arena');
     final unlockedNames = prefs.getStringList('unlocked_avatars');
+    final claimedMissionNames = prefs.getStringList('claimed_missions');
+    final dailyClaimMs = prefs.getInt('last_daily_reward_claimed_at') ?? 0;
     final selected = _avatarFromName(selectedName) ?? PlayerAvatar.blue;
     final selectedArena =
         _arenaFromName(selectedArenaName) ?? ArenaBackground.base;
@@ -278,6 +359,17 @@ class _GameShellState extends State<GameShell>
           : PlayerAvatar.blue;
       _selectedArena = selectedArena;
       _darkMode = prefs.getBool('dark_mode') ?? false;
+      _lastDailyRewardClaimedAt = dailyClaimMs > 0
+          ? DateTime.fromMillisecondsSinceEpoch(dailyClaimMs)
+          : null;
+      _dailyRewardStreak = prefs.getInt('daily_reward_streak') ?? 0;
+      _dailyRewardClaims = prefs.getInt('daily_reward_claims') ?? 0;
+      _roundsPlayed = prefs.getInt('rounds_played') ?? 0;
+      _totalTags = prefs.getInt('total_tags') ?? 0;
+      _bellZoneRounds = prefs.getInt('bell_zone_rounds') ?? 0;
+      _shrinkingYardRounds = prefs.getInt('shrinking_yard_rounds') ?? 0;
+      _tagFrenzyTags = prefs.getInt('tag_frenzy_tags') ?? 0;
+      _claimedMissions = claimedMissionNames?.toSet() ?? {};
     });
   }
 
@@ -287,6 +379,18 @@ class _GameShellState extends State<GameShell>
     await prefs.setBool('dark_mode', _darkMode);
     await prefs.setString('selected_avatar', _selectedAvatar.name);
     await prefs.setString('selected_arena', _selectedArena.name);
+    await prefs.setInt(
+      'last_daily_reward_claimed_at',
+      _lastDailyRewardClaimedAt?.millisecondsSinceEpoch ?? 0,
+    );
+    await prefs.setInt('daily_reward_streak', _dailyRewardStreak);
+    await prefs.setInt('daily_reward_claims', _dailyRewardClaims);
+    await prefs.setInt('rounds_played', _roundsPlayed);
+    await prefs.setInt('total_tags', _totalTags);
+    await prefs.setInt('bell_zone_rounds', _bellZoneRounds);
+    await prefs.setInt('shrinking_yard_rounds', _shrinkingYardRounds);
+    await prefs.setInt('tag_frenzy_tags', _tagFrenzyTags);
+    await prefs.setStringList('claimed_missions', _claimedMissions.toList());
     await prefs.setStringList(
       'unlocked_avatars',
       _unlockedAvatars.map((avatar) => avatar.name).toList(),
@@ -317,6 +421,108 @@ class _GameShellState extends State<GameShell>
     return null;
   }
 
+  BlitzMode _modeForArena(ArenaBackground arena) {
+    return switch (arena) {
+      ArenaBackground.base => BlitzMode.staminaChase,
+      ArenaBackground.bellZone => BlitzMode.bellZone,
+      ArenaBackground.shrinkingYard => BlitzMode.shrinkingYard,
+      ArenaBackground.frenzy => BlitzMode.tagFrenzy,
+    };
+  }
+
+  bool get _canClaimDailyReward {
+    final lastClaimed = _lastDailyRewardClaimedAt;
+    if (lastClaimed == null) {
+      return true;
+    }
+    return DateTime.now().difference(lastClaimed) >= const Duration(hours: 24);
+  }
+
+  Duration get _dailyRewardRemaining {
+    final lastClaimed = _lastDailyRewardClaimedAt;
+    if (lastClaimed == null) {
+      return Duration.zero;
+    }
+    final remaining =
+        const Duration(hours: 24) - DateTime.now().difference(lastClaimed);
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  int get _dailyRewardAmount {
+    return 250 + math.min(_dailyRewardStreak, 5) * 25;
+  }
+
+  List<_MissionProgress> get _missions {
+    return [
+      _MissionProgress(
+        id: 'daily_claim',
+        title: 'Daily Pickup',
+        body: 'Claim the daily reward once.',
+        icon: Icons.card_giftcard_rounded,
+        color: const Color(0xffffd64c),
+        progress: _dailyRewardClaims,
+        target: 1,
+        reward: 120,
+        claimed: _claimedMissions.contains('daily_claim'),
+      ),
+      _MissionProgress(
+        id: 'play_rounds',
+        title: 'Playground Warmup',
+        body: 'Finish three rounds in any mode.',
+        icon: Icons.play_arrow_rounded,
+        color: const Color(0xff39d9ff),
+        progress: _roundsPlayed,
+        target: 3,
+        reward: 180,
+        claimed: _claimedMissions.contains('play_rounds'),
+      ),
+      _MissionProgress(
+        id: 'tag_runner',
+        title: 'Tag Runner',
+        body: 'Score ten tags across rounds.',
+        icon: Icons.local_fire_department_rounded,
+        color: const Color(0xffff405f),
+        progress: _totalTags,
+        target: 10,
+        reward: 260,
+        claimed: _claimedMissions.contains('tag_runner'),
+      ),
+      _MissionProgress(
+        id: 'bell_zone',
+        title: 'Bell Regular',
+        body: 'Complete two Bell Zone rounds.',
+        icon: Icons.notifications_active_rounded,
+        color: const Color(0xff9d55ff),
+        progress: _bellZoneRounds,
+        target: 2,
+        reward: 220,
+        claimed: _claimedMissions.contains('bell_zone'),
+      ),
+      _MissionProgress(
+        id: 'yard_escape',
+        title: 'Yard Escape',
+        body: 'Complete two Shrinking Yard rounds.',
+        icon: Icons.warning_rounded,
+        color: const Color(0xffff8a18),
+        progress: _shrinkingYardRounds,
+        target: 2,
+        reward: 220,
+        claimed: _claimedMissions.contains('yard_escape'),
+      ),
+      _MissionProgress(
+        id: 'frenzy_tags',
+        title: 'Frenzy Tags',
+        body: 'Land four tags in Tag Frenzy.',
+        icon: Icons.flash_on_rounded,
+        color: const Color(0xffffd64c),
+        progress: _tagFrenzyTags,
+        target: 4,
+        reward: 300,
+        claimed: _claimedMissions.contains('frenzy_tags'),
+      ),
+    ];
+  }
+
   void _tick(Duration elapsed) {
     final previous = _previousTick;
     _previousTick = elapsed;
@@ -328,10 +534,15 @@ class _GameShellState extends State<GameShell>
         (elapsed - previous).inMicroseconds / Duration.microsecondsPerSecond;
     if (_screen == _ShellScreen.game && !_simulation.roundOver) {
       _simulation.update(dt, _input);
+      if (_tutorialActive) {
+        _updateInteractiveTutorial(dt);
+      }
     }
     _input.consumePresses();
+    _tutorialDashPressed = false;
     _animationSeconds += dt;
     if (_screen == _ShellScreen.game &&
+        !_tutorialActive &&
         _simulation.roundOver &&
         !_roundRewardGranted) {
       _grantRoundReward();
@@ -349,11 +560,22 @@ class _GameShellState extends State<GameShell>
         20 + (human.score / 12).floor() + human.tags * 12 + (won ? 40 : 0);
     _lastReward = reward.clamp(20, 260);
     _coins += _lastReward;
+    _roundsPlayed += 1;
+    _totalTags += human.tags;
+    if (_selectedArena == ArenaBackground.bellZone) {
+      _bellZoneRounds += 1;
+    } else if (_selectedArena == ArenaBackground.shrinkingYard) {
+      _shrinkingYardRounds += 1;
+    } else if (_selectedArena == ArenaBackground.frenzy) {
+      _tagFrenzyTags += human.tags;
+    }
     _roundRewardGranted = true;
     unawaited(_saveProgress());
   }
 
   void _startGame() {
+    _tutorialActive = false;
+    _tutorialPickupId = null;
     if (_ticker.isActive) {
       _ticker.stop();
     }
@@ -368,7 +590,10 @@ class _GameShellState extends State<GameShell>
       roundLength: _settings.roundLength,
       difficulty: _settings.difficulty,
     );
-    _simulation = PlaygroundBlitzSimulation(_settings);
+    _simulation = PlaygroundBlitzSimulation(
+      _settings,
+      mode: _modeForArena(_selectedArena),
+    );
     _screen = _ShellScreen.game;
     _previousTick = null;
     _animationSeconds = 0;
@@ -381,8 +606,191 @@ class _GameShellState extends State<GameShell>
     setState(() {});
   }
 
+  void _startInteractiveTutorial() {
+    if (_ticker.isActive) {
+      _ticker.stop();
+    }
+    _selectedArena = ArenaBackground.base;
+    _settings = GameSettings(
+      playerName: _nameController.text.trim().isEmpty
+          ? 'Player'
+          : _nameController.text.trim(),
+      botCount: 3,
+      roundLength: 120,
+      difficulty: Difficulty.chill,
+    );
+    _simulation = PlaygroundBlitzSimulation(
+      _settings,
+      mode: BlitzMode.staminaChase,
+    );
+    _screen = _ShellScreen.game;
+    _tutorialActive = true;
+    _tutorialStep = _TutorialStep.move;
+    _tutorialProgress = 0;
+    _tutorialDashPressed = false;
+    _tutorialPickupId = null;
+    _tutorialStartTags = _simulation.human.tags;
+    _tutorialMoveStart = _simulation.human.position;
+    _previousTick = null;
+    _animationSeconds = 0;
+    _lastReward = 0;
+    _roundRewardGranted = false;
+    _input.move = Offset.zero;
+    _input.sprint = false;
+    _stickOffset = Offset.zero;
+    _prepareTutorialSandbox();
+    _ticker.start();
+    setState(() {});
+  }
+
+  void _prepareTutorialSandbox() {
+    for (final player in _simulation.players) {
+      player
+        ..isIt = false
+        ..safety = 8
+        ..velocity = Offset.zero
+        ..dashCooldown = 0
+        ..fakeOutCooldown = 0
+        ..shieldTimer = 0
+        ..speedBoostTimer = 0;
+    }
+    final human = _simulation.human
+      ..position = const Offset(380, 760)
+      ..safety = 1.2
+      ..stamina = 100;
+    if (_simulation.players.length > 1) {
+      _simulation.players[1]
+        ..isIt = true
+        ..position = const Offset(380, 380)
+        ..safety = 8;
+    }
+    for (var i = 2; i < _simulation.players.length; i += 1) {
+      _simulation.players[i].position = Offset(190 + i * 90.0, 260);
+    }
+    _simulation.setBountyEnabled(false);
+    _simulation.powerUps.clear();
+    _tutorialMoveStart = human.position;
+    assert(human.position.dx > 0);
+  }
+
+  void _updateInteractiveTutorial(double dt) {
+    switch (_tutorialStep) {
+      case _TutorialStep.move:
+        final movedDistance =
+            (_simulation.human.position - _tutorialMoveStart).distance;
+        if (movedDistance >= 28) {
+          _tutorialProgress = 1;
+          _advanceTutorialStep(_TutorialStep.dash);
+          break;
+        }
+        final movementProgress = (movedDistance / 55)
+            .clamp(0.0, 1.0)
+            .toDouble();
+        _tutorialProgress = math.max(_tutorialProgress, movementProgress);
+        if (_input.move.distance > 0.34) {
+          _tutorialProgress = math.min(
+            1,
+            math.max(_tutorialProgress, 0.72) + dt * 2.4,
+          );
+        } else {
+          _tutorialProgress = math.max(
+            movementProgress,
+            _tutorialProgress - dt * 0.18,
+          );
+        }
+        if (_tutorialProgress >= 1) {
+          _advanceTutorialStep(_TutorialStep.dash);
+        }
+        break;
+      case _TutorialStep.dash:
+        _tutorialProgress = _tutorialDashPressed ? 1 : 0;
+        if (_tutorialDashPressed || _simulation.human.dashCooldown > 0) {
+          _advanceTutorialStep(_TutorialStep.pickup);
+        }
+        break;
+      case _TutorialStep.pickup:
+        final pickupId = _tutorialPickupId;
+        final collected =
+            pickupId != null &&
+            !_simulation.powerUps.any((powerUp) => powerUp.id == pickupId);
+        _tutorialProgress = collected ? 1 : 0;
+        if (collected) {
+          _advanceTutorialStep(_TutorialStep.bounty);
+        }
+        break;
+      case _TutorialStep.bounty:
+        _tutorialProgress = _simulation.human.tags > _tutorialStartTags
+            ? 1
+            : (_simulation.human.score / 260).clamp(0.0, 0.95).toDouble();
+        if (_simulation.human.tags > _tutorialStartTags) {
+          _advanceTutorialStep(_TutorialStep.complete);
+        }
+        break;
+      case _TutorialStep.complete:
+        _tutorialProgress = 1;
+        break;
+    }
+  }
+
+  void _advanceTutorialStep(_TutorialStep step) {
+    _tutorialStep = step;
+    _tutorialProgress = step == _TutorialStep.complete ? 1 : 0;
+    if (step == _TutorialStep.pickup) {
+      _placeTutorialPickup();
+    } else if (step == _TutorialStep.bounty) {
+      _prepareTutorialBounty();
+    } else if (step == _TutorialStep.complete) {
+      _simulation.roundOver = true;
+      _ticker.stop();
+    }
+  }
+
+  void _placeTutorialPickup() {
+    final human = _simulation.human;
+    _simulation.powerUps.clear();
+    final pickup = _simulation.addPracticePowerUp(
+      PowerUpKind.lightning,
+      human.position.translate(0, -118),
+      ttl: 90,
+    );
+    _tutorialPickupId = pickup.id;
+  }
+
+  void _prepareTutorialBounty() {
+    final human = _simulation.human;
+    for (final player in _simulation.players) {
+      player
+        ..isIt = false
+        ..safety = 8
+        ..velocity = Offset.zero;
+    }
+    human
+      ..isIt = true
+      ..safety = 0
+      ..stamina = 100
+      ..dashCooldown = 0
+      ..speedBoostTimer = math.max(human.speedBoostTimer, 4);
+    _simulation.setBountyEnabled(true);
+    final target = _simulation.players.firstWhere(
+      (player) => !player.isHuman,
+      orElse: () => human,
+    );
+    if (target.id != human.id) {
+      target
+        ..isIt = false
+        ..position = human.position.translate(0, -150)
+        ..safety = 0
+        ..stamina = 70
+        ..velocity = Offset.zero;
+      _simulation.setPracticeBounty(target, seconds: 45);
+    }
+    _tutorialStartTags = human.tags;
+  }
+
   void _openHome() {
     _ticker.stop();
+    _tutorialActive = false;
+    _tutorialPickupId = null;
     _input.move = Offset.zero;
     _input.sprint = false;
     _stickOffset = Offset.zero;
@@ -392,6 +800,7 @@ class _GameShellState extends State<GameShell>
 
   void _openSetup() {
     _ticker.stop();
+    _tutorialActive = false;
     _input.move = Offset.zero;
     _input.sprint = false;
     _stickOffset = Offset.zero;
@@ -401,6 +810,7 @@ class _GameShellState extends State<GameShell>
 
   void _openStore() {
     _ticker.stop();
+    _tutorialActive = false;
     _input.move = Offset.zero;
     _input.sprint = false;
     _stickOffset = Offset.zero;
@@ -410,6 +820,7 @@ class _GameShellState extends State<GameShell>
 
   void _openArenas() {
     _ticker.stop();
+    _tutorialActive = false;
     _input.move = Offset.zero;
     _input.sprint = false;
     _stickOffset = Offset.zero;
@@ -419,11 +830,28 @@ class _GameShellState extends State<GameShell>
 
   void _openTutorial() {
     _ticker.stop();
+    _tutorialActive = false;
     _input.move = Offset.zero;
     _input.sprint = false;
     _stickOffset = Offset.zero;
     _screen = _ShellScreen.tutorial;
     setState(() {});
+  }
+
+  void _openMissions() {
+    _ticker.stop();
+    _tutorialActive = false;
+    _input.move = Offset.zero;
+    _input.sprint = false;
+    _stickOffset = Offset.zero;
+    _screen = _ShellScreen.missions;
+    setState(() {});
+  }
+
+  void _startArenaMode(ArenaBackground arena) {
+    _selectedArena = arena;
+    unawaited(_saveProgress());
+    _startGame();
   }
 
   void _toggleDarkMode() {
@@ -433,6 +861,30 @@ class _GameShellState extends State<GameShell>
 
   void _selectArena(ArenaBackground arena) {
     setState(() => _selectedArena = arena);
+    unawaited(_saveProgress());
+  }
+
+  void _claimDailyReward() {
+    if (!_canClaimDailyReward) {
+      return;
+    }
+    setState(() {
+      _coins += _dailyRewardAmount;
+      _dailyRewardStreak += 1;
+      _dailyRewardClaims += 1;
+      _lastDailyRewardClaimedAt = DateTime.now();
+    });
+    unawaited(_saveProgress());
+  }
+
+  void _claimMission(_MissionProgress mission) {
+    if (!mission.complete || mission.claimed) {
+      return;
+    }
+    setState(() {
+      _coins += mission.reward;
+      _claimedMissions = {..._claimedMissions, mission.id};
+    });
     unawaited(_saveProgress());
   }
 
@@ -479,7 +931,9 @@ class _GameShellState extends State<GameShell>
               darkMode: _darkMode,
             ),
           if (_screen == _ShellScreen.game) _GameHud(simulation: _simulation),
-          if (_screen == _ShellScreen.game && !_simulation.roundOver)
+          if (_screen == _ShellScreen.game &&
+              !_simulation.roundOver &&
+              !_tutorialActive)
             _TopActions(onSetup: _openSetup, onRestart: _startGame),
           if (_screen == _ShellScreen.game && !_simulation.roundOver)
             _ControlsOverlay(
@@ -487,7 +941,21 @@ class _GameShellState extends State<GameShell>
               stickOffset: _stickOffset,
               onStickChanged: _handleStickChanged,
               onStickReleased: _releaseStick,
-              onDash: () => _input.dashPressed = true,
+              onDash: () {
+                _input.dashPressed = true;
+                _tutorialDashPressed = true;
+              },
+            ),
+          if (_screen == _ShellScreen.game && _tutorialActive)
+            _TutorialTouchTargets(step: _tutorialStep),
+          if (_screen == _ShellScreen.game && _tutorialActive)
+            _InteractiveTutorialOverlay(
+              step: _tutorialStep,
+              progress: _tutorialProgress,
+              simulation: _simulation,
+              onExit: _openHome,
+              onRestart: _startInteractiveTutorial,
+              onPlay: _startGame,
             ),
           if (_screen == _ShellScreen.home)
             _HomeOverlay(
@@ -496,11 +964,17 @@ class _GameShellState extends State<GameShell>
               selectedArena: _selectedArena,
               selectedAvatar: _selectedAvatar,
               avatars: _avatarSprites,
+              canClaimDailyReward: _canClaimDailyReward,
+              dailyRewardAmount: _dailyRewardAmount,
+              dailyRewardRemaining: _dailyRewardRemaining,
               onPlay: _startGame,
+              onMode: _startArenaMode,
+              onClaimDailyReward: _claimDailyReward,
               onStore: _openStore,
               onSetup: _openSetup,
               onArenas: _openArenas,
-              onTutorial: _openTutorial,
+              onTutorial: _startInteractiveTutorial,
+              onMissions: _openMissions,
               onToggleDarkMode: _toggleDarkMode,
             ),
           if (_screen == _ShellScreen.setup)
@@ -510,6 +984,7 @@ class _GameShellState extends State<GameShell>
               onSettingsChanged: (settings) =>
                   setState(() => _settings = settings),
               onPlay: _startGame,
+              onTutorial: _startInteractiveTutorial,
               onBack: _openHome,
             ),
           if (_screen == _ShellScreen.store)
@@ -531,10 +1006,20 @@ class _GameShellState extends State<GameShell>
           if (_screen == _ShellScreen.tutorial)
             _TutorialOverlay(
               darkMode: _darkMode,
+              onPlay: _startInteractiveTutorial,
+              onBack: _openHome,
+            ),
+          if (_screen == _ShellScreen.missions)
+            _MissionsOverlay(
+              coins: _coins,
+              missions: _missions,
+              onClaim: _claimMission,
               onPlay: _startGame,
               onBack: _openHome,
             ),
-          if (_screen == _ShellScreen.game && _simulation.roundOver)
+          if (_screen == _ShellScreen.game &&
+              _simulation.roundOver &&
+              !_tutorialActive)
             _ResultsOverlay(
               simulation: _simulation,
               coins: _coins,
@@ -699,6 +1184,7 @@ class _SetupMenu extends StatelessWidget {
     required this.nameController,
     required this.onSettingsChanged,
     required this.onPlay,
+    required this.onTutorial,
     required this.onBack,
   });
 
@@ -706,6 +1192,7 @@ class _SetupMenu extends StatelessWidget {
   final TextEditingController nameController;
   final ValueChanged<GameSettings> onSettingsChanged;
   final VoidCallback onPlay;
+  final VoidCallback onTutorial;
   final VoidCallback onBack;
 
   @override
@@ -826,6 +1313,21 @@ class _SetupMenu extends StatelessWidget {
                           ),
                           const SizedBox(width: 10),
                           Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xff182035),
+                                side: const BorderSide(
+                                  color: Color(0xffffc743),
+                                  width: 2,
+                                ),
+                              ),
+                              onPressed: onTutorial,
+                              icon: const Icon(Icons.school_rounded),
+                              label: const Text('Practice'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
                             child: SizedBox(
                               height: 48,
                               child: FilledButton.icon(
@@ -894,11 +1396,17 @@ class _HomeOverlay extends StatelessWidget {
     required this.selectedArena,
     required this.selectedAvatar,
     required this.avatars,
+    required this.canClaimDailyReward,
+    required this.dailyRewardAmount,
+    required this.dailyRewardRemaining,
     required this.onPlay,
+    required this.onMode,
+    required this.onClaimDailyReward,
     required this.onStore,
     required this.onSetup,
     required this.onArenas,
     required this.onTutorial,
+    required this.onMissions,
     required this.onToggleDarkMode,
   });
 
@@ -907,11 +1415,17 @@ class _HomeOverlay extends StatelessWidget {
   final ArenaBackground selectedArena;
   final PlayerAvatar selectedAvatar;
   final Map<PlayerAvatar, ui.Image> avatars;
+  final bool canClaimDailyReward;
+  final int dailyRewardAmount;
+  final Duration dailyRewardRemaining;
   final VoidCallback onPlay;
+  final ValueChanged<ArenaBackground> onMode;
+  final VoidCallback onClaimDailyReward;
   final VoidCallback onStore;
   final VoidCallback onSetup;
   final VoidCallback onArenas;
   final VoidCallback onTutorial;
+  final VoidCallback onMissions;
   final VoidCallback onToggleDarkMode;
 
   @override
@@ -925,6 +1439,9 @@ class _HomeOverlay extends StatelessWidget {
             selectedArena,
             selectedAvatar,
             avatars.length,
+            canClaimDailyReward,
+            dailyRewardAmount,
+            dailyRewardRemaining.inMinutes,
           );
           assert(stateFingerprint != -1);
           return Stack(
@@ -973,7 +1490,7 @@ class _HomeOverlay extends StatelessWidget {
                 top: 0.89,
                 width: 0.21,
                 height: 0.10,
-                onTap: onTutorial,
+                onTap: onMissions,
               ),
               _HomeImageButton(
                 label: 'GEAR',
@@ -984,12 +1501,36 @@ class _HomeOverlay extends StatelessWidget {
                 onTap: onSetup,
               ),
               _HomeImageButton(
-                label: 'ARENAS',
+                label: 'STAMINA CHASE',
                 left: 0.69,
                 top: 0.34,
                 width: 0.30,
-                height: 0.37,
-                onTap: onArenas,
+                height: 0.09,
+                onTap: () => onMode(ArenaBackground.base),
+              ),
+              _HomeImageButton(
+                label: 'BELL ZONE',
+                left: 0.69,
+                top: 0.43,
+                width: 0.30,
+                height: 0.09,
+                onTap: () => onMode(ArenaBackground.bellZone),
+              ),
+              _HomeImageButton(
+                label: 'SHRINKING YARD',
+                left: 0.69,
+                top: 0.52,
+                width: 0.30,
+                height: 0.09,
+                onTap: () => onMode(ArenaBackground.shrinkingYard),
+              ),
+              _HomeImageButton(
+                label: 'TAG FRENZY',
+                left: 0.69,
+                top: 0.61,
+                width: 0.30,
+                height: 0.09,
+                onTap: () => onMode(ArenaBackground.frenzy),
               ),
               _HomeImageButton(
                 label: 'SKINS',
@@ -998,6 +1539,30 @@ class _HomeOverlay extends StatelessWidget {
                 width: 0.20,
                 height: 0.19,
                 onTap: onStore,
+              ),
+              _HomeImageButton(
+                label: 'DAILY REWARD',
+                left: 0.04,
+                top: 0.24,
+                width: 0.20,
+                height: 0.15,
+                onTap: onClaimDailyReward,
+              ),
+              Positioned(
+                left: constraints.maxWidth * 0.055,
+                top: constraints.maxHeight * 0.345,
+                width: constraints.maxWidth * 0.17,
+                child: _HomeDailyRewardBadge(
+                  canClaim: canClaimDailyReward,
+                  amount: dailyRewardAmount,
+                  remaining: dailyRewardRemaining,
+                ),
+              ),
+              Positioned(
+                left: constraints.maxWidth * 0.24,
+                top: constraints.maxHeight * 0.64,
+                width: constraints.maxWidth * 0.52,
+                child: _HomePracticeButton(onTap: onTutorial),
               ),
               Positioned(
                 left: 0,
@@ -1055,6 +1620,139 @@ class _HomeImageButton extends StatelessWidget {
                 splashColor: Colors.white.withValues(alpha: 0.05),
                 highlightColor: Colors.white.withValues(alpha: 0.03),
                 child: Opacity(opacity: 0, child: Center(child: Text(label))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomePracticeButton extends StatelessWidget {
+  const _HomePracticeButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Ink(
+          height: 58,
+          padding: const EdgeInsets.symmetric(horizontal: 11),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xff41e7ff), Color(0xff147fc9)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0xcc000000),
+                blurRadius: 16,
+                offset: Offset(0, 8),
+              ),
+              BoxShadow(color: Color(0x9941e7ff), blurRadius: 16),
+            ],
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.school_rounded, color: Colors.white, size: 28),
+              SizedBox(width: 8),
+              Flexible(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'LEARN TO PLAY',
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                          shadows: [
+                            Shadow(color: Colors.black, offset: Offset(2, 2)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Interactive tutorial',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Color(0xfffff27a),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: 6),
+              Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeDailyRewardBadge extends StatelessWidget {
+  const _HomeDailyRewardBadge({
+    required this.canClaim,
+    required this.amount,
+    required this.remaining,
+  });
+
+  final bool canClaim;
+  final int amount;
+  final Duration remaining;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = canClaim ? 'CLAIM +$amount' : _formatDurationShort(remaining);
+    return IgnorePointer(
+      child: Container(
+        height: 27,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: canClaim
+                ? const [Color(0xffffdc55), Color(0xffff9d1f)]
+                : const [Color(0xff24303a), Color(0xff080b10)],
+          ),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: canClaim ? Colors.white : const Color(0xff657480),
+            width: 2,
+          ),
+          boxShadow: const [BoxShadow(color: Color(0xaa000000), blurRadius: 8)],
+        ),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: canClaim ? const Color(0xff182035) : Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                height: 1,
               ),
             ),
           ),
@@ -1407,8 +2105,9 @@ class _TutorialOverlay extends StatelessWidget {
       _TutorialTip(
         icon: Icons.warning_rounded,
         color: Color(0xffff8a18),
-        title: 'Final Rules',
-        body: 'The yard shrinks, then Frenzy makes tags worth double.',
+        title: 'Modes',
+        body:
+            'Pick Stamina, Bell, Shrinking Yard, or Frenzy for different rules.',
       ),
     ];
 
@@ -1474,13 +2173,711 @@ class _TutorialOverlay extends StatelessWidget {
                 onPressed: onPlay,
                 icon: const Icon(Icons.play_arrow_rounded, size: 30),
                 label: const Text(
-                  'START ROUND',
+                  'START PRACTICE',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _InteractiveTutorialOverlay extends StatelessWidget {
+  const _InteractiveTutorialOverlay({
+    required this.step,
+    required this.progress,
+    required this.simulation,
+    required this.onExit,
+    required this.onRestart,
+    required this.onPlay,
+  });
+
+  final _TutorialStep step;
+  final double progress;
+  final PlaygroundBlitzSimulation simulation;
+  final VoidCallback onExit;
+  final VoidCallback onRestart;
+  final VoidCallback onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final complete = step == _TutorialStep.complete;
+    final bounty = simulation.bountyTarget;
+    final stepIndex = switch (step) {
+      _TutorialStep.move => 1,
+      _TutorialStep.dash => 2,
+      _TutorialStep.pickup => 3,
+      _TutorialStep.bounty => 4,
+      _TutorialStep.complete => 4,
+    };
+    final detail = switch (step) {
+      _TutorialStep.move => 'Hold and drag the left joystick.',
+      _TutorialStep.dash => 'Tap the shoe button on the right.',
+      _TutorialStep.pickup => 'Run through the glowing lightning token.',
+      _TutorialStep.bounty =>
+        bounty == null ? step.body : 'Tag ${bounty.name}, the crown runner.',
+      _TutorialStep.complete => 'Practice complete. Jump into a real match.',
+    };
+    final actionText = complete
+        ? 'You know the loop.'
+        : 'Highlighted action advances the tutorial.';
+
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 112, 12, 0),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: _arcadePlate(
+                borderColor: complete
+                    ? const Color(0xff8cff6a)
+                    : const Color(0xffffd64c),
+                shadowColor: Colors.black.withValues(alpha: 0.62),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      _TutorialStatusChip(
+                        icon: Icons.school_rounded,
+                        text: 'INTERACTIVE TUTORIAL',
+                        color: const Color(0xff39d9ff),
+                      ),
+                      const Spacer(),
+                      _TutorialStatusChip(
+                        icon: Icons.flag_rounded,
+                        text: 'STEP $stepIndex/4',
+                        color: const Color(0xffffd64c),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xffffd64c).withValues(alpha: 0.2),
+                          border: Border.all(
+                            color: const Color(0xffffd64c),
+                            width: 2,
+                          ),
+                        ),
+                        child: Icon(
+                          step.icon,
+                          color: const Color(0xffffd64c),
+                          size: 28,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              step.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                height: 1,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black,
+                                    offset: Offset(1, 1),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              detail,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.82),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                height: 1.15,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 9),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: LinearProgressIndicator(
+                      minHeight: 9,
+                      value: progress.clamp(0.0, 1.0).toDouble(),
+                      color: complete
+                          ? const Color(0xff8cff6a)
+                          : const Color(0xffffd64c),
+                      backgroundColor: Colors.black.withValues(alpha: 0.58),
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 94,
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.54),
+                              width: 2,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          onPressed: complete ? onRestart : onExit,
+                          child: Text(complete ? 'RETRY' : 'EXIT'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: complete
+                            ? FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xffffa229),
+                                  foregroundColor: const Color(0xff182035),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                onPressed: onPlay,
+                                child: const Text('PLAY MATCH'),
+                              )
+                            : Container(
+                                height: 40,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xff101820,
+                                  ).withValues(alpha: 0.78),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: const Color(0xff39d9ff),
+                                    width: 2,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.touch_app_rounded,
+                                      color: Color(0xff39d9ff),
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          actionText,
+                                          maxLines: 1,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TutorialStatusChip extends StatelessWidget {
+  const _TutorialStatusChip({
+    required this.icon,
+    required this.text,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: color, width: 1.6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 15),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TutorialTouchTargets extends StatelessWidget {
+  const _TutorialTouchTargets({required this.step});
+
+  final _TutorialStep step;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 520;
+            final joystickSize = compact ? 112.0 : 126.0;
+            final dashSize = compact ? 108.0 : 118.0;
+            final sidePad = compact ? 20.0 : 24.0;
+            final bottomPad = compact ? 18.0 : 24.0;
+            return Stack(
+              children: [
+                if (step == _TutorialStep.move)
+                  Positioned(
+                    left: sidePad - 8,
+                    bottom: bottomPad - 8,
+                    width: joystickSize + 16,
+                    height: joystickSize + 16,
+                    child: const _TutorialPulseTarget(
+                      label: 'DRAG',
+                      icon: Icons.open_with_rounded,
+                      color: Color(0xff39d9ff),
+                    ),
+                  ),
+                if (step == _TutorialStep.dash)
+                  Positioned(
+                    right: sidePad - 8,
+                    bottom: bottomPad - 8,
+                    width: dashSize + 16,
+                    height: dashSize + 16,
+                    child: const _TutorialPulseTarget(
+                      label: 'TAP',
+                      icon: Icons.directions_run_rounded,
+                      color: Color(0xffb244ff),
+                    ),
+                  ),
+                if (step == _TutorialStep.pickup)
+                  Positioned(
+                    left: constraints.maxWidth * 0.5 - 104,
+                    bottom: bottomPad + dashSize + 24,
+                    width: 208,
+                    child: const _TutorialFloatingCue(
+                      label: 'GRAB THE LIGHTNING',
+                      icon: Icons.bolt_rounded,
+                      color: Color(0xffffd64c),
+                    ),
+                  ),
+                if (step == _TutorialStep.bounty)
+                  Positioned(
+                    left: constraints.maxWidth * 0.5 - 96,
+                    top: constraints.maxHeight * 0.30,
+                    width: 192,
+                    child: const _TutorialFloatingCue(
+                      label: 'CHASE THE CROWN',
+                      icon: Icons.emoji_events_rounded,
+                      color: Color(0xffff405f),
+                    ),
+                  ),
+                if (step == _TutorialStep.complete)
+                  Positioned(
+                    left: constraints.maxWidth * 0.5 - 92,
+                    bottom: bottomPad + dashSize + 18,
+                    width: 184,
+                    child: const _TutorialFloatingCue(
+                      label: 'READY TO PLAY',
+                      icon: Icons.check_circle_rounded,
+                      color: Color(0xff8cff6a),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _TutorialPulseTarget extends StatelessWidget {
+  const _TutorialPulseTarget({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color.withValues(alpha: 0.08),
+        border: Border.all(color: color, width: 5),
+        boxShadow: [
+          BoxShadow(color: color.withValues(alpha: 0.64), blurRadius: 24),
+          const BoxShadow(
+            color: Color(0xaa000000),
+            blurRadius: 18,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xff101820).withValues(alpha: 0.86),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: Colors.white, width: 1.8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: 18),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TutorialFloatingCue extends StatelessWidget {
+  const _TutorialFloatingCue({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: _arcadePlate(
+        borderColor: color,
+        shadowColor: color.withValues(alpha: 0.44),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 7),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                    shadows: [
+                      Shadow(color: Colors.black, offset: Offset(1, 1)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MissionsOverlay extends StatelessWidget {
+  const _MissionsOverlay({
+    required this.coins,
+    required this.missions,
+    required this.onClaim,
+    required this.onPlay,
+    required this.onBack,
+  });
+
+  final int coins;
+  final List<_MissionProgress> missions;
+  final ValueChanged<_MissionProgress> onClaim;
+  final VoidCallback onPlay;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = missions
+        .where((mission) => mission.complete && !mission.claimed)
+        .length;
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+        child: Column(
+          children: [
+            _ArcadeScreenHeader(
+              title: 'MISSIONS',
+              icon: Icons.assignment_rounded,
+              color: const Color(0xffffd64c),
+              onBack: onBack,
+              trailing: Text(
+                '${_formatNumber(coins)} coins',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _arcadePlate(borderColor: const Color(0xff39d9ff)),
+              child: Row(
+                children: [
+                  Icon(
+                    completed > 0
+                        ? Icons.stars_rounded
+                        : Icons.flag_circle_rounded,
+                    color: const Color(0xffffd64c),
+                    size: 30,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      completed > 0
+                          ? '$completed reward${completed == 1 ? '' : 's'} ready to claim.'
+                          : 'Finish rounds in each mode to unlock rewards.',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        height: 1.15,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            for (final mission in missions) ...[
+              _MissionCard(mission: mission, onClaim: onClaim),
+              const SizedBox(height: 8),
+            ],
+            SizedBox(
+              width: double.infinity,
+              height: 62,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xffffa229),
+                  foregroundColor: const Color(0xff182035),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: onPlay,
+                icon: const Icon(Icons.play_arrow_rounded, size: 30),
+                label: const Text(
+                  'PLAY A ROUND',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MissionCard extends StatelessWidget {
+  const _MissionCard({required this.mission, required this.onClaim});
+
+  final _MissionProgress mission;
+  final ValueChanged<_MissionProgress> onClaim;
+
+  @override
+  Widget build(BuildContext context) {
+    final buttonLabel = mission.claimed
+        ? 'DONE'
+        : mission.complete
+        ? 'CLAIM'
+        : '${mission.progress.clamp(0, mission.target)}/${mission.target}';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(11),
+      decoration: _arcadePlate(
+        borderColor: mission.claimed
+            ? const Color(0xff657480)
+            : mission.complete
+            ? const Color(0xffffd64c)
+            : mission.color,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: mission.color.withValues(alpha: 0.2),
+              border: Border.all(color: mission.color, width: 2),
+            ),
+            child: Icon(mission.icon, color: mission.color, size: 26),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        mission.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '+${mission.reward}',
+                      style: const TextStyle(
+                        color: Color(0xffffd64c),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  mission.body,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.76),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(99),
+                  child: LinearProgressIndicator(
+                    minHeight: 8,
+                    value: mission.fraction,
+                    color: mission.complete
+                        ? const Color(0xffffd64c)
+                        : mission.color,
+                    backgroundColor: Colors.black.withValues(alpha: 0.55),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 82,
+            height: 42,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: mission.claimed
+                    ? const Color(0xff657480)
+                    : mission.complete
+                    ? const Color(0xffffd64c)
+                    : const Color(0xff22303a),
+                foregroundColor: mission.complete && !mission.claimed
+                    ? const Color(0xff182035)
+                    : Colors.white,
+                padding: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: mission.complete && !mission.claimed
+                  ? () => onClaim(mission)
+                  : null,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  buttonLabel,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3559,6 +4956,18 @@ String _formatNumber(int value) {
   return buffer.toString();
 }
 
+String _formatDurationShort(Duration value) {
+  if (value <= Duration.zero) {
+    return 'READY';
+  }
+  final hours = value.inHours;
+  final minutes = value.inMinutes.remainder(60);
+  if (hours > 0) {
+    return '${hours}h ${minutes.toString().padLeft(2, '0')}m';
+  }
+  return '${math.max(1, minutes)}m';
+}
+
 class _GameHud extends StatelessWidget {
   const _GameHud({required this.simulation});
 
@@ -3598,10 +5007,19 @@ class _GameHud extends StatelessWidget {
                       SizedBox(width: compact ? 6 : 8),
                       _TagsPlate(
                         value: totalTags,
-                        target: 15,
+                        target: simulation.tagTarget,
                         compact: compact,
                       ),
                     ],
+                  ),
+                ),
+                Positioned(
+                  right: 12,
+                  top: compact ? 68 : 72,
+                  child: _GoalPlate(
+                    score: simulation.human.score.round(),
+                    goal: simulation.scoreGoal,
+                    compact: compact,
                   ),
                 ),
                 Positioned(
@@ -3643,16 +5061,7 @@ class _GameHud extends StatelessWidget {
   }
 
   String _modeTitle(PlaygroundBlitzSimulation simulation) {
-    if (simulation.frenzy) {
-      return 'Tag Frenzy';
-    }
-    if (simulation.shrinkProgress > 0.42) {
-      return 'Shrinking Yard';
-    }
-    if (simulation.bellZone.active) {
-      return 'Bell Zone';
-    }
-    return 'Stamina Chase';
+    return simulation.mode.title;
   }
 }
 
@@ -3784,6 +5193,75 @@ class _TagsPlate extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _GoalPlate extends StatelessWidget {
+  const _GoalPlate({
+    required this.score,
+    required this.goal,
+    this.compact = false,
+  });
+
+  final int score;
+  final int goal;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = (score / goal).clamp(0.0, 1.0).toDouble();
+    return Container(
+      width: compact ? 150 : 168,
+      height: compact ? 34 : 38,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: _arcadePlate(borderColor: const Color(0xffffd64c)),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.emoji_events_rounded,
+            color: Color(0xffffd64c),
+            size: 16,
+          ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '$score/$goal PTS',
+                      maxLines: 1,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  flex: 4,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: LinearProgressIndicator(
+                      minHeight: 6,
+                      value: progress,
+                      color: const Color(0xffffd64c),
+                      backgroundColor: Colors.black.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3947,7 +5425,17 @@ class _EventBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (simulation.frenzy) {
+    final bounty = simulation.bountyTarget;
+    if (bounty != null && simulation.bountyTimeLeft > 0) {
+      return _CenterEventPlate(
+        icon: Icons.emoji_events_rounded,
+        label: 'Bounty',
+        value: simulation.bountyTimeLeft.ceil().toString().padLeft(2, '0'),
+        color: const Color(0xffffd64c),
+        compact: compact,
+      );
+    }
+    if (simulation.mode == BlitzMode.tagFrenzy) {
       return _CenterEventPlate(
         icon: Icons.flash_on_rounded,
         label: 'FRENZY',
@@ -3956,7 +5444,8 @@ class _EventBanner extends StatelessWidget {
         compact: compact,
       );
     }
-    if (simulation.shrinkProgress > 0.42) {
+    if (simulation.mode == BlitzMode.shrinkingYard &&
+        simulation.shrinkProgress > 0.08) {
       final seconds = (12 - simulation.shrinkProgress * 9).ceil().clamp(1, 12);
       return _CenterEventPlate(
         icon: Icons.warning_rounded,
@@ -4115,29 +5604,30 @@ class _ObjectiveToast extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final icon = simulation.frenzy
-        ? Icons.local_fire_department_rounded
-        : simulation.shrinkProgress > 0.42
-        ? Icons.warning_amber_rounded
-        : simulation.bellZone.active
-        ? Icons.star_rounded
-        : Icons.bolt_rounded;
-    final title = simulation.frenzy
-        ? 'Tag streak x2'
-        : simulation.shrinkProgress > 0.42
-        ? 'Yard closing'
-        : simulation.bellZone.active
-        ? 'Stay in the zone'
-        : 'Watch your stamina';
-    final body = simulation.frenzy
-        ? 'Quick tags score double!'
-        : simulation.shrinkProgress > 0.42
-        ? 'Stay inside the cones!'
-        : simulation.bellZone.active
-        ? 'to earn points!'
-        : 'Low stamina = slower!';
+    final human = simulation.human;
+    final bounty = simulation.bountyTarget;
+    final isBounty = bounty?.id == human.id;
+    final chaseBounty = human.isIt && bounty != null;
+    final icon = isBounty || chaseBounty
+        ? Icons.emoji_events_rounded
+        : switch (simulation.mode) {
+            BlitzMode.staminaChase => Icons.bolt_rounded,
+            BlitzMode.bellZone => Icons.star_rounded,
+            BlitzMode.shrinkingYard => Icons.warning_amber_rounded,
+            BlitzMode.tagFrenzy => Icons.local_fire_department_rounded,
+          };
+    final title = isBounty
+        ? 'Survive the crown'
+        : chaseBounty
+        ? 'Tag the crown'
+        : simulation.mode.objectiveTitle;
+    final body = isBounty
+        ? 'Stay away for bonus points!'
+        : chaseBounty
+        ? '${bounty.name} is worth a bounty bonus!'
+        : simulation.mode.objectiveBody;
     return Container(
-      constraints: BoxConstraints(maxWidth: compact ? 250 : 360),
+      constraints: BoxConstraints(maxWidth: compact ? 310 : 380),
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 12 : 16,
         vertical: compact ? 8 : 10,

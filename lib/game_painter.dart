@@ -76,6 +76,7 @@ class PlaygroundPainter extends CustomPainter {
       _drawApprovedBackground(canvas, approvedBackground);
       _drawYardPressure(canvas);
       _drawBellZone(canvas);
+      _drawPowerUps(canvas);
       _drawDecoys(canvas);
       _drawTagRing(canvas);
       _drawPlayers(canvas);
@@ -104,6 +105,7 @@ class PlaygroundPainter extends CustomPainter {
     _drawObstacles(canvas);
     _drawYardPressure(canvas);
     _drawBellZone(canvas);
+    _drawPowerUps(canvas);
     _drawDecoys(canvas);
     _drawTagRing(canvas);
     _drawPlayers(canvas);
@@ -411,6 +413,131 @@ class PlaygroundPainter extends CustomPainter {
     _drawBell(canvas, bell.center);
   }
 
+  void _drawPowerUps(Canvas canvas) {
+    for (final powerUp in simulation.powerUps) {
+      final color = _powerUpColor(powerUp.kind);
+      final pulse = math.sin(animationTime * 6 + powerUp.id) * 3.5;
+      final center = powerUp.position.translate(
+        0,
+        math.sin(animationTime * 4 + powerUp.id) * 4,
+      );
+      canvas.drawCircle(
+        center,
+        34 + pulse,
+        Paint()
+          ..color = color.withValues(alpha: 0.25)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
+      );
+      canvas.drawCircle(
+        center,
+        24,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              Colors.white.withValues(alpha: 0.92),
+              color.withValues(alpha: 0.94),
+              const Color(0xff111820),
+            ],
+          ).createShader(Rect.fromCircle(center: center, radius: 28)),
+      );
+      canvas.drawCircle(
+        center,
+        24,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3
+          ..color = Colors.white.withValues(alpha: 0.84),
+      );
+      _drawPowerUpGlyph(canvas, powerUp.kind, center, color);
+    }
+  }
+
+  Color _powerUpColor(PowerUpKind kind) {
+    return switch (kind) {
+      PowerUpKind.lightning => const Color(0xff66ecff),
+      PowerUpKind.shield => const Color(0xff8cff6a),
+      PowerUpKind.stamina => const Color(0xffffd64c),
+      PowerUpKind.star => const Color(0xffff8a18),
+    };
+  }
+
+  void _drawPowerUpGlyph(
+    Canvas canvas,
+    PowerUpKind kind,
+    Offset center,
+    Color color,
+  ) {
+    final fill = Paint()..color = const Color(0xff111820);
+    final shine = Paint()..color = Colors.white.withValues(alpha: 0.92);
+    switch (kind) {
+      case PowerUpKind.lightning:
+        final bolt = Path()
+          ..moveTo(center.dx + 3, center.dy - 18)
+          ..lineTo(center.dx - 10, center.dy + 2)
+          ..lineTo(center.dx - 1, center.dy + 2)
+          ..lineTo(center.dx - 5, center.dy + 18)
+          ..lineTo(center.dx + 12, center.dy - 5)
+          ..lineTo(center.dx + 2, center.dy - 5)
+          ..close();
+        canvas.drawPath(bolt.shift(const Offset(2, 2)), fill);
+        canvas.drawPath(bolt, shine);
+      case PowerUpKind.shield:
+        final shield = Path()
+          ..moveTo(center.dx, center.dy - 18)
+          ..quadraticBezierTo(
+            center.dx + 17,
+            center.dy - 11,
+            center.dx + 14,
+            center.dy + 5,
+          )
+          ..quadraticBezierTo(
+            center.dx + 10,
+            center.dy + 16,
+            center.dx,
+            center.dy + 20,
+          )
+          ..quadraticBezierTo(
+            center.dx - 10,
+            center.dy + 16,
+            center.dx - 14,
+            center.dy + 5,
+          )
+          ..quadraticBezierTo(
+            center.dx - 17,
+            center.dy - 11,
+            center.dx,
+            center.dy - 18,
+          )
+          ..close();
+        canvas.drawPath(shield.shift(const Offset(2, 2)), fill);
+        canvas.drawPath(shield, shine);
+      case PowerUpKind.stamina:
+        final battery = RRect.fromRectAndRadius(
+          Rect.fromCenter(center: center, width: 28, height: 18),
+          const Radius.circular(5),
+        );
+        canvas.drawRRect(battery.shift(const Offset(2, 2)), fill);
+        canvas.drawRRect(battery, shine);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(center.dx - 10, center.dy - 6, 18, 12),
+            const Radius.circular(3),
+          ),
+          Paint()..color = color,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(center.dx + 14, center.dy - 5, 5, 10),
+            const Radius.circular(2),
+          ),
+          shine,
+        );
+      case PowerUpKind.star:
+        _drawStar(canvas, center.translate(2, 2), 17, fill);
+        _drawStar(canvas, center, 17, shine);
+    }
+  }
+
   void _drawDecoys(Canvas canvas) {
     for (final decoy in simulation.decoys) {
       final alpha = decoy.ttl.clamp(0.0, 1.0).toDouble() * 0.52;
@@ -482,8 +609,79 @@ class PlaygroundPainter extends CustomPainter {
       _drawMotionTrail(canvas, player);
     }
     for (final player in sortedPlayers) {
+      _drawStatusAura(canvas, player);
+    }
+    for (final player in sortedPlayers) {
       _drawRunner(canvas, player);
       _drawPlayerMarker(canvas, player);
+      if (player.id == simulation.bountyTargetId &&
+          simulation.bountyTimeLeft > 0 &&
+          !player.isIt) {
+        _drawBountyCrown(canvas, player.position.translate(0, -86));
+      }
+    }
+  }
+
+  void _drawBountyCrown(Canvas canvas, Offset center) {
+    final bob = math.sin(animationTime * 6) * 3;
+    final crownCenter = center.translate(0, bob);
+    final crown = Path()
+      ..moveTo(crownCenter.dx - 20, crownCenter.dy + 9)
+      ..lineTo(crownCenter.dx - 16, crownCenter.dy - 10)
+      ..lineTo(crownCenter.dx - 5, crownCenter.dy + 1)
+      ..lineTo(crownCenter.dx, crownCenter.dy - 15)
+      ..lineTo(crownCenter.dx + 5, crownCenter.dy + 1)
+      ..lineTo(crownCenter.dx + 16, crownCenter.dy - 10)
+      ..lineTo(crownCenter.dx + 20, crownCenter.dy + 9)
+      ..close();
+    canvas.drawPath(
+      crown.shift(const Offset(2, 3)),
+      Paint()..color = Colors.black.withValues(alpha: 0.34),
+    );
+    canvas.drawPath(crown, Paint()..color = const Color(0xffffd64c));
+    canvas.drawPath(
+      crown,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.4
+        ..color = const Color(0xff5f3600),
+    );
+    canvas.drawCircle(
+      crownCenter.translate(0, -15),
+      4,
+      Paint()..color = Colors.white.withValues(alpha: 0.9),
+    );
+  }
+
+  void _drawStatusAura(Canvas canvas, PlayerState player) {
+    if (player.speedBoostTimer > 0) {
+      final boostPulse = math.sin(animationTime * 10) * 5;
+      canvas.drawCircle(
+        player.position.translate(0, -8),
+        44 + boostPulse,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 5
+          ..color = const Color(0xff66ecff).withValues(alpha: 0.52),
+      );
+    }
+    if (player.shieldTimer > 0) {
+      final shieldPulse = math.sin(animationTime * 8) * 4;
+      canvas.drawCircle(
+        player.position.translate(0, -8),
+        52 + shieldPulse,
+        Paint()
+          ..color = const Color(0xff8cff6a).withValues(alpha: 0.14)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+      );
+      canvas.drawCircle(
+        player.position.translate(0, -8),
+        50 + shieldPulse,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 5
+          ..color = const Color(0xff8cff6a).withValues(alpha: 0.78),
+      );
     }
   }
 
@@ -522,10 +720,7 @@ class PlaygroundPainter extends CustomPainter {
     }
 
     final speed = player.velocity.distance;
-    final angle = speed > 8
-        ? math.atan2(player.velocity.dy, player.velocity.dx)
-        : -math.pi / 2;
-    final facingRight = math.cos(angle) >= 0;
+    final facingRight = player.facingRight;
     final bodyColor = player.isIt ? _red : player.color;
     final skin = const Color(0xffffbd82);
     final phase = math.sin(animationTime * (speed > 20 ? 14 : 6));
@@ -637,11 +832,7 @@ class PlaygroundPainter extends CustomPainter {
     PlayerState player,
     ui.Image avatar,
   ) {
-    final speed = player.velocity.distance;
-    final angle = speed > 8
-        ? math.atan2(player.velocity.dy, player.velocity.dx)
-        : -math.pi / 2;
-    final facingRight = math.cos(angle) >= 0;
+    final facingRight = player.facingRight;
 
     if (player.isIt || player.safety > 0 || player.fakeOutTimer > 0) {
       canvas.drawCircle(

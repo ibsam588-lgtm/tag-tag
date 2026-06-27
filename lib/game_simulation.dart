@@ -3,7 +3,40 @@ import 'dart:ui';
 
 enum Difficulty { chill, balanced, blitz }
 
+enum BlitzMode { staminaChase, bellZone, shrinkingYard, tagFrenzy }
+
+extension BlitzModeCopy on BlitzMode {
+  String get title {
+    return switch (this) {
+      BlitzMode.staminaChase => 'Stamina Chase',
+      BlitzMode.bellZone => 'Bell Zone',
+      BlitzMode.shrinkingYard => 'Shrinking Yard',
+      BlitzMode.tagFrenzy => 'Tag Frenzy',
+    };
+  }
+
+  String get objectiveTitle {
+    return switch (this) {
+      BlitzMode.staminaChase => 'Grab boosts',
+      BlitzMode.bellZone => 'Hold the bell',
+      BlitzMode.shrinkingYard => 'Escape & shield',
+      BlitzMode.tagFrenzy => 'Combo tags',
+    };
+  }
+
+  String get objectiveBody {
+    return switch (this) {
+      BlitzMode.staminaChase => 'Boosts and stamina keep you alive!',
+      BlitzMode.bellZone => 'Power-ups help you stay inside!',
+      BlitzMode.shrinkingYard => 'Shields can save a close tag!',
+      BlitzMode.tagFrenzy => 'Fast repeats build bonus points!',
+    };
+  }
+}
+
 enum ObstacleKind { slide, bench, fence, chalk, cones }
+
+enum PowerUpKind { lightning, shield, stamina, star }
 
 class GameSettings {
   const GameSettings({
@@ -56,14 +89,20 @@ class PlayerState {
   final Color color;
   final bool isHuman;
   bool isIt;
+  bool facingRight = true;
   double score = 0;
   double stamina = 100;
   double safety = 1.2;
+  double shieldTimer = 0;
+  double speedBoostTimer = 0;
+  double comboTimer = 0;
   double dashCooldown = 0;
   double dashTimer = 0;
   double fakeOutCooldown = 0;
   double fakeOutTimer = 0;
   int tags = 0;
+  int comboCount = 0;
+  int starTokens = 0;
 }
 
 class BellZone {
@@ -85,6 +124,20 @@ class Decoy {
   Offset position;
   Color color;
   String name;
+  double ttl;
+}
+
+class PowerUp {
+  PowerUp({
+    required this.id,
+    required this.kind,
+    required this.position,
+    required this.ttl,
+  });
+
+  final int id;
+  final PowerUpKind kind;
+  Offset position;
   double ttl;
 }
 
@@ -111,15 +164,18 @@ class MoveIntent {
 }
 
 class PlaygroundBlitzSimulation {
-  PlaygroundBlitzSimulation(this.settings)
-    : timer = settings.roundLength,
-      players = _createPlayers(settings);
+  PlaygroundBlitzSimulation(this.settings, {this.mode = BlitzMode.staminaChase})
+    : timer = _modeRoundLength(settings.roundLength, mode),
+      players = _createPlayers(settings) {
+    _configureModeStart();
+  }
 
   static const Size worldSize = Size(760, 1200);
   static const Rect startYard = Rect.fromLTWH(64, 64, 632, 1072);
   static const Rect finalYard = Rect.fromLTWH(132, 188, 496, 824);
   static const double playerRadius = 18;
   static const double tagRadius = 42;
+  static const double playerSeparationRadius = 58;
 
   static const List<ArenaObstacle> obstacles = [
     ArenaObstacle(
@@ -155,9 +211,11 @@ class PlaygroundBlitzSimulation {
   ];
 
   final GameSettings settings;
+  final BlitzMode mode;
   final List<PlayerState> players;
   final BellZone bellZone = BellZone();
   final List<Decoy> decoys = [];
+  final List<PowerUp> powerUps = [];
   final List<FloatingText> floatingTexts = [];
   final math.Random _random = math.Random();
 
@@ -169,11 +227,41 @@ class PlaygroundBlitzSimulation {
   bool _bellCelebrated = false;
   bool _frenzyCelebrated = false;
   int _lastBoostSecond = -1;
+  double _powerUpSpawnTimer = 0;
+  int _nextPowerUpId = 0;
+  String? _bountyTargetId;
+  double _bountyTimeLeft = 0;
+  bool _bountyEnabled = true;
 
+  double get roundLength => _modeRoundLength(settings.roundLength, mode);
   PlayerState get human => players.firstWhere((player) => player.isHuman);
   PlayerState get it =>
       players.firstWhere((player) => player.isIt, orElse: () => players.first);
-  bool get frenzy => timer <= 15;
+  bool get bellMode => mode == BlitzMode.bellZone;
+  bool get shrinkingMode => mode == BlitzMode.shrinkingYard;
+  bool get frenzy => mode == BlitzMode.tagFrenzy;
+  int get tagTarget => frenzy ? 12 : 15;
+  int get scoreGoal => frenzy
+      ? 900
+      : shrinkingMode
+      ? 1050
+      : 1200;
+  int get starGoal => 3;
+  double get bountyTimeLeft => _bountyTimeLeft;
+  String? get bountyTargetId => _bountyTargetId;
+
+  PlayerState? get bountyTarget {
+    final id = _bountyTargetId;
+    if (id == null || _bountyTimeLeft <= 0) {
+      return null;
+    }
+    for (final player in players) {
+      if (player.id == id && !player.isIt) {
+        return player;
+      }
+    }
+    return null;
+  }
 
   PlayerState get winner {
     final sorted = [...players]..sort((a, b) => b.score.compareTo(a.score));
@@ -181,20 +269,26 @@ class PlaygroundBlitzSimulation {
   }
 
   Rect get yard {
+    if (!shrinkingMode) {
+      return startYard;
+    }
     const shrinkStart = 15.0;
-    final shrinkDuration = math.max(18.0, settings.roundLength - 32);
+    final shrinkDuration = math.max(18.0, roundLength - 32);
     final t = ((elapsed - shrinkStart) / shrinkDuration).clamp(0.0, 1.0);
     return Rect.lerp(startYard, finalYard, t)!;
   }
 
   double get shrinkProgress {
+    if (!shrinkingMode) {
+      return 0;
+    }
     const shrinkStart = 15.0;
-    final shrinkDuration = math.max(18.0, settings.roundLength - 32);
+    final shrinkDuration = math.max(18.0, roundLength - 32);
     return ((elapsed - shrinkStart) / shrinkDuration).clamp(0.0, 1.0);
   }
 
   void reset() {
-    final fresh = PlaygroundBlitzSimulation(settings);
+    final fresh = PlaygroundBlitzSimulation(settings, mode: mode);
     players
       ..clear()
       ..addAll(fresh.players);
@@ -205,8 +299,11 @@ class PlaygroundBlitzSimulation {
       ..timeLeft = fresh.bellZone.timeLeft
       ..nextIn = fresh.bellZone.nextIn;
     decoys.clear();
+    powerUps
+      ..clear()
+      ..addAll(fresh.powerUps);
     floatingTexts.clear();
-    timer = settings.roundLength;
+    timer = roundLength;
     elapsed = 0;
     noTagTimer = 0;
     catchupBoost = 1;
@@ -214,6 +311,11 @@ class PlaygroundBlitzSimulation {
     _bellCelebrated = false;
     _frenzyCelebrated = false;
     _lastBoostSecond = -1;
+    _powerUpSpawnTimer = fresh._powerUpSpawnTimer;
+    _nextPowerUpId = fresh._nextPowerUpId;
+    _bountyTargetId = fresh._bountyTargetId;
+    _bountyTimeLeft = fresh._bountyTimeLeft;
+    _bountyEnabled = fresh._bountyEnabled;
   }
 
   void update(double deltaSeconds, GameInput input) {
@@ -243,14 +345,52 @@ class PlaygroundBlitzSimulation {
     }
 
     _updateBellZone(dt);
+    _updateBounty(dt);
+    _updatePowerUps(dt);
     _updateDecoys(dt);
     _updatePlayers(dt, input);
+    _collectPowerUps();
     _resolveTags();
+    _resolvePlayerSeparation(yard);
     _scoreObjectives(dt);
 
-    if (timer <= 0) {
+    if (timer <= 0 || players.any((player) => player.score >= scoreGoal)) {
       roundOver = true;
     }
+  }
+
+  static double _modeRoundLength(double baseLength, BlitzMode mode) {
+    return switch (mode) {
+      BlitzMode.staminaChase => baseLength,
+      BlitzMode.bellZone => math.max(75, baseLength),
+      BlitzMode.shrinkingYard => math.min(baseLength, 85),
+      BlitzMode.tagFrenzy => math.min(baseLength, 70),
+    };
+  }
+
+  void _configureModeStart() {
+    if (bellMode) {
+      bellZone
+        ..center = const Offset(380, 600)
+        ..radius = 128
+        ..active = true
+        ..timeLeft = 10
+        ..nextIn = 0;
+    } else {
+      bellZone
+        ..active = false
+        ..timeLeft = 0
+        ..nextIn = double.infinity;
+    }
+
+    if (frenzy) {
+      catchupBoost = 1.18;
+    }
+
+    _powerUpSpawnTimer = _nextPowerUpDelay() * 0.55;
+    _spawnPowerUp();
+    _spawnPowerUp();
+    _startNewBounty(initial: true);
   }
 
   static List<PlayerState> _createPlayers(GameSettings settings) {
@@ -309,6 +449,14 @@ class PlaygroundBlitzSimulation {
   }
 
   void _updateBellZone(double dt) {
+    if (!bellMode) {
+      bellZone
+        ..active = false
+        ..timeLeft = 0
+        ..nextIn = double.infinity;
+      return;
+    }
+
     if (bellZone.active) {
       bellZone.timeLeft -= dt;
       if (!_bellCelebrated) {
@@ -324,7 +472,7 @@ class PlaygroundBlitzSimulation {
       }
       if (bellZone.timeLeft <= 0) {
         bellZone.active = false;
-        bellZone.nextIn = 12;
+        bellZone.nextIn = settings.difficulty == Difficulty.blitz ? 4 : 5;
         _bellCelebrated = false;
       }
       return;
@@ -342,8 +490,268 @@ class PlaygroundBlitzSimulation {
             _random.nextDouble() * math.max(120, activeYard.height - 260),
       );
       bellZone.active = true;
-      bellZone.timeLeft = settings.difficulty == Difficulty.blitz ? 7 : 8.5;
+      bellZone.radius = settings.difficulty == Difficulty.blitz ? 118 : 128;
+      bellZone.timeLeft = settings.difficulty == Difficulty.blitz ? 8 : 10;
     }
+  }
+
+  void _updateBounty(double dt) {
+    if (!_bountyEnabled) {
+      _bountyTargetId = null;
+      _bountyTimeLeft = 0;
+      return;
+    }
+
+    final current = bountyTarget;
+    if (current == null) {
+      _startNewBounty();
+      return;
+    }
+
+    _bountyTimeLeft -= dt;
+    if (_bountyTimeLeft <= 0) {
+      current.score += frenzy ? 90 : 120;
+      current.stamina = math.min(100, current.stamina + 18);
+      _float(
+        current.position,
+        'SURVIVE +${frenzy ? 90 : 120}',
+        const Color(0xffffd64c),
+      );
+      _startNewBounty();
+    }
+  }
+
+  void _startNewBounty({bool initial = false}) {
+    final candidates = players.where((player) => !player.isIt).toList();
+    if (candidates.isEmpty) {
+      _bountyTargetId = null;
+      _bountyTimeLeft = 0;
+      return;
+    }
+
+    candidates.sort((a, b) {
+      final scoreCompare = b.score.compareTo(a.score);
+      if (scoreCompare != 0) {
+        return scoreCompare;
+      }
+      return a.id.compareTo(b.id);
+    });
+    final targetPool = candidates.take(math.min(3, candidates.length)).toList();
+    final target = targetPool[_random.nextInt(targetPool.length)];
+    _bountyTargetId = target.id;
+    _bountyTimeLeft = frenzy ? 8.0 : 11.0;
+    if (!initial) {
+      _float(
+        target.position.translate(0, -58),
+        'BOUNTY!',
+        const Color(0xffffd64c),
+        ttl: 0.95,
+      );
+    }
+  }
+
+  void setPracticeBounty(PlayerState target, {double seconds = 30}) {
+    if (!players.contains(target) || target.isIt) {
+      return;
+    }
+    _bountyEnabled = true;
+    _bountyTargetId = target.id;
+    _bountyTimeLeft = seconds;
+  }
+
+  void setBountyEnabled(bool enabled) {
+    _bountyEnabled = enabled;
+    if (!enabled) {
+      _bountyTargetId = null;
+      _bountyTimeLeft = 0;
+    }
+  }
+
+  PowerUp addPracticePowerUp(
+    PowerUpKind kind,
+    Offset position, {
+    double ttl = 60,
+  }) {
+    final powerUp = PowerUp(
+      id: _nextPowerUpId++,
+      kind: kind,
+      position: position,
+      ttl: ttl,
+    );
+    powerUps.add(powerUp);
+    return powerUp;
+  }
+
+  void _updatePowerUps(double dt) {
+    for (final powerUp in powerUps) {
+      powerUp.ttl -= dt;
+    }
+    powerUps.removeWhere((powerUp) => powerUp.ttl <= 0);
+
+    _powerUpSpawnTimer -= dt;
+    if (_powerUpSpawnTimer <= 0 && powerUps.length < _maxPowerUps) {
+      _spawnPowerUp();
+      _powerUpSpawnTimer = _nextPowerUpDelay();
+    }
+  }
+
+  int get _maxPowerUps {
+    return switch (mode) {
+      BlitzMode.staminaChase => 3,
+      BlitzMode.bellZone => 4,
+      BlitzMode.shrinkingYard => 4,
+      BlitzMode.tagFrenzy => 5,
+    };
+  }
+
+  double _nextPowerUpDelay() {
+    final base = switch (mode) {
+      BlitzMode.staminaChase => 5.6,
+      BlitzMode.bellZone => 5.1,
+      BlitzMode.shrinkingYard => 4.7,
+      BlitzMode.tagFrenzy => 3.4,
+    };
+    return base * (0.78 + _random.nextDouble() * 0.48);
+  }
+
+  void _spawnPowerUp() {
+    final activeYard = yard.deflate(74);
+    for (var attempt = 0; attempt < 18; attempt += 1) {
+      final position = Offset(
+        activeYard.left + _random.nextDouble() * activeYard.width,
+        activeYard.top + _random.nextDouble() * activeYard.height,
+      );
+      if (_isPowerUpSpotClear(position)) {
+        powerUps.add(
+          PowerUp(
+            id: _nextPowerUpId++,
+            kind: _randomPowerUpKind(),
+            position: position,
+            ttl: frenzy ? 8.5 : 11.5,
+          ),
+        );
+        return;
+      }
+    }
+  }
+
+  bool _isPowerUpSpotClear(Offset position) {
+    for (final obstacle in obstacles) {
+      if (obstacle.rect.inflate(54).contains(position)) {
+        return false;
+      }
+    }
+    for (final player in players) {
+      if ((player.position - position).distance < 76) {
+        return false;
+      }
+    }
+    for (final powerUp in powerUps) {
+      if ((powerUp.position - position).distance < 118) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  PowerUpKind _randomPowerUpKind() {
+    final roll = _random.nextDouble();
+    return switch (mode) {
+      BlitzMode.staminaChase =>
+        roll < 0.36
+            ? PowerUpKind.stamina
+            : roll < 0.68
+            ? PowerUpKind.lightning
+            : roll < 0.86
+            ? PowerUpKind.shield
+            : PowerUpKind.star,
+      BlitzMode.bellZone =>
+        roll < 0.34
+            ? PowerUpKind.star
+            : roll < 0.58
+            ? PowerUpKind.shield
+            : roll < 0.82
+            ? PowerUpKind.lightning
+            : PowerUpKind.stamina,
+      BlitzMode.shrinkingYard =>
+        roll < 0.34
+            ? PowerUpKind.shield
+            : roll < 0.62
+            ? PowerUpKind.lightning
+            : roll < 0.84
+            ? PowerUpKind.stamina
+            : PowerUpKind.star,
+      BlitzMode.tagFrenzy =>
+        roll < 0.42
+            ? PowerUpKind.lightning
+            : roll < 0.72
+            ? PowerUpKind.star
+            : roll < 0.88
+            ? PowerUpKind.stamina
+            : PowerUpKind.shield,
+    };
+  }
+
+  void _collectPowerUps() {
+    final collected = <PowerUp>[];
+    for (final powerUp in powerUps) {
+      for (final player in players) {
+        if ((player.position - powerUp.position).distance <= 46) {
+          _applyPowerUp(player, powerUp);
+          collected.add(powerUp);
+          break;
+        }
+      }
+    }
+    powerUps.removeWhere(collected.contains);
+  }
+
+  void _applyPowerUp(PlayerState player, PowerUp powerUp) {
+    switch (powerUp.kind) {
+      case PowerUpKind.lightning:
+        player
+          ..speedBoostTimer = math.max(player.speedBoostTimer, frenzy ? 4.2 : 5)
+          ..stamina = math.min(100, player.stamina + 22)
+          ..dashCooldown = math.max(0, player.dashCooldown - 1.1);
+        _float(player.position, 'BOOST!', const Color(0xff66ecff));
+      case PowerUpKind.shield:
+        player.shieldTimer = math.max(player.shieldTimer, 6.2);
+        _float(player.position, 'SHIELD!', const Color(0xff9dff73));
+      case PowerUpKind.stamina:
+        player
+          ..stamina = 100
+          ..dashCooldown = math.max(0, player.dashCooldown - 1.8)
+          ..fakeOutCooldown = math.max(0, player.fakeOutCooldown - 1.2);
+        _float(player.position, 'FULL!', const Color(0xffffe36a));
+      case PowerUpKind.star:
+        final bonus = bellMode
+            ? 120
+            : frenzy
+            ? 110
+            : 90;
+        player.starTokens = math.min(starGoal, player.starTokens + 1);
+        player.score += bonus;
+        if (player.starTokens >= starGoal) {
+          player
+            ..starTokens = 0
+            ..score += 180
+            ..speedBoostTimer = math.max(player.speedBoostTimer, 4.8)
+            ..shieldTimer = math.max(player.shieldTimer, 3.5);
+          _float(player.position, 'BLITZ!', const Color(0xffff8a18), ttl: 1);
+        } else {
+          _float(
+            player.position,
+            'STAR ${player.starTokens}/$starGoal',
+            const Color(0xffffd64c),
+          );
+        }
+    }
+  }
+
+  void _float(Offset position, String text, Color color, {double ttl = 0.78}) {
+    floatingTexts.add(
+      FloatingText(position: position, text: text, color: color, ttl: ttl),
+    );
   }
 
   void _updateDecoys(double dt) {
@@ -366,10 +774,16 @@ class PlaygroundBlitzSimulation {
     for (final player in players) {
       player
         ..safety = math.max(0, player.safety - dt)
+        ..shieldTimer = math.max(0, player.shieldTimer - dt)
+        ..speedBoostTimer = math.max(0, player.speedBoostTimer - dt)
+        ..comboTimer = math.max(0, player.comboTimer - dt)
         ..dashCooldown = math.max(0, player.dashCooldown - dt)
         ..fakeOutCooldown = math.max(0, player.fakeOutCooldown - dt)
         ..dashTimer = math.max(0, player.dashTimer - dt)
         ..fakeOutTimer = math.max(0, player.fakeOutTimer - dt);
+      if (player.comboTimer <= 0) {
+        player.comboCount = 0;
+      }
 
       final intent = player.isHuman
           ? _humanIntent(player, input)
@@ -429,6 +843,7 @@ class PlaygroundBlitzSimulation {
     final tagger = it;
     final toIt = tagger.position - player.position;
     final itDistance = toIt.distance;
+    final crowdAvoidance = _crowdAvoidance(player);
 
     if (player.isIt) {
       final target = _pickTagTarget(player);
@@ -441,17 +856,26 @@ class PlaygroundBlitzSimulation {
           ..stamina -= 14;
       }
       return MoveIntent(
-        _normalized(target.position - player.position),
+        _normalized(
+          _normalized(target.position - player.position) +
+              crowdAvoidance * 0.18,
+        ),
         sprint: true,
       );
     }
 
     final wantsBell =
+        bellMode &&
         bellZone.active &&
         (bellZone.center - player.position).distance > 28 &&
         itDistance > (settings.difficulty == Difficulty.blitz ? 185 : 220);
     if (wantsBell) {
-      return MoveIntent(_normalized(bellZone.center - player.position));
+      return MoveIntent(
+        _normalized(
+          _normalized(bellZone.center - player.position) +
+              crowdAvoidance * 0.34,
+        ),
+      );
     }
 
     if (itDistance < 250) {
@@ -472,7 +896,10 @@ class PlaygroundBlitzSimulation {
         );
       }
       return MoveIntent(
-        _normalized(player.position - tagger.position),
+        _normalized(
+          _normalized(player.position - tagger.position) +
+              crowdAvoidance * 0.46,
+        ),
         sprint: itDistance < 190,
       );
     }
@@ -482,7 +909,9 @@ class PlaygroundBlitzSimulation {
       Offset(center.dy - player.position.dy, -(center.dx - player.position.dx)),
     );
     final towardCenter = _normalized(center - player.position);
-    return MoveIntent(_normalized(orbit * 0.75 + towardCenter * 0.25));
+    return MoveIntent(
+      _normalized(orbit * 0.62 + towardCenter * 0.2 + crowdAvoidance * 0.58),
+    );
   }
 
   void _applyMovement(PlayerState player, MoveIntent intent, double dt) {
@@ -491,11 +920,20 @@ class PlaygroundBlitzSimulation {
       Difficulty.balanced => 1.0,
       Difficulty.blitz => 1.08,
     };
-    var speed = (player.isHuman ? 242.0 : 226.0) * difficultySpeed;
+    final modeSpeed = switch (mode) {
+      BlitzMode.staminaChase => 1.0,
+      BlitzMode.bellZone => 1.02,
+      BlitzMode.shrinkingYard => 1.06,
+      BlitzMode.tagFrenzy => 1.12,
+    };
+    var speed = (player.isHuman ? 242.0 : 226.0) * difficultySpeed * modeSpeed;
 
     if (player.isIt) {
       speed *= frenzy ? 1.22 : 1.08;
       speed *= catchupBoost;
+    }
+    if (player.speedBoostTimer > 0) {
+      speed *= player.isIt ? 1.16 : 1.26;
     }
     if (player.dashTimer > 0) {
       speed *= 2.15;
@@ -514,26 +952,79 @@ class PlaygroundBlitzSimulation {
 
     if (intent.direction.distance <= 0.1) {
       player.velocity *= 0.85;
-      player.stamina = math.min(100, player.stamina + 17 * dt);
+      player.stamina = math.min(
+        100,
+        player.stamina + _restRecovery(player) * dt,
+      );
     } else {
       player.velocity = intent.direction * speed;
-      final drain = player.dashTimer > 0
+      final baseDrain = player.dashTimer > 0
           ? 12
           : intent.sprint
           ? 24
           : player.isIt
           ? 4
           : 7;
+      final drain = baseDrain * _staminaDrainFactor;
       player.stamina = math.max(0, player.stamina - drain * dt);
     }
 
     if (!player.isHuman || player.stamina < 100) {
       player.stamina = math.min(
         100,
-        player.stamina + (player.isIt ? 13 : 10) * dt,
+        player.stamina + _moveRecovery(player) * dt,
       );
     }
     player.position += player.velocity * dt;
+    if (player.velocity.distance > 24 && player.velocity.dx.abs() > 8) {
+      player.facingRight = player.velocity.dx >= 0;
+    }
+  }
+
+  Offset _crowdAvoidance(PlayerState player) {
+    var push = Offset.zero;
+    for (final other in players) {
+      if (other.id == player.id) {
+        continue;
+      }
+      final delta = player.position - other.position;
+      final distance = delta.distance;
+      if (distance <= 0 || distance > 128) {
+        continue;
+      }
+      final strength = (128 - distance) / 128;
+      push += delta / distance * strength;
+    }
+    return _normalized(push);
+  }
+
+  double get _staminaDrainFactor {
+    return switch (mode) {
+      BlitzMode.staminaChase => 1.42,
+      BlitzMode.bellZone => 1.04,
+      BlitzMode.shrinkingYard => 1.14,
+      BlitzMode.tagFrenzy => 0.86,
+    };
+  }
+
+  double _restRecovery(PlayerState player) {
+    final base = player.isIt ? 18.0 : 22.0;
+    return switch (mode) {
+      BlitzMode.staminaChase => base * 0.72,
+      BlitzMode.bellZone => base,
+      BlitzMode.shrinkingYard => base * 0.92,
+      BlitzMode.tagFrenzy => base * 1.24,
+    };
+  }
+
+  double _moveRecovery(PlayerState player) {
+    final base = player.isIt ? 9.0 : 7.0;
+    return switch (mode) {
+      BlitzMode.staminaChase => base * 0.45,
+      BlitzMode.bellZone => base * 0.95,
+      BlitzMode.shrinkingYard => base * 0.82,
+      BlitzMode.tagFrenzy => base * 1.25,
+    };
   }
 
   void _resolveTags() {
@@ -547,10 +1038,24 @@ class PlaygroundBlitzSimulation {
       }
 
       if ((tagger.position - target.position).distance <= tagRadius) {
+        if (target.shieldTimer > 0) {
+          _blockTag(tagger, target);
+          break;
+        }
         final multiplier = frenzy ? 2 : 1;
+        final comboCount = tagger.comboTimer > 0 ? tagger.comboCount + 1 : 1;
+        final comboBonus = math.max(0, comboCount - 1) * (frenzy ? 80 : 45);
+        final bountyHit = target.id == _bountyTargetId && _bountyTimeLeft > 0;
+        final bountyBonus = bountyHit ? (frenzy ? 220 : 260) : 0;
         tagger
-          ..score += 100 * multiplier
+          ..score +=
+              (frenzy ? 125 : 100) * multiplier + comboBonus + bountyBonus
           ..tags += 1
+          ..comboCount = comboCount
+          ..comboTimer = frenzy ? 6.0 : 4.6
+          ..speedBoostTimer = bountyHit
+              ? math.max(tagger.speedBoostTimer, 3.5)
+              : tagger.speedBoostTimer
           ..isIt = false
           ..safety = 1
           ..stamina = math.min(100, tagger.stamina + 22);
@@ -558,16 +1063,26 @@ class PlaygroundBlitzSimulation {
           ..score = math.max(0, target.score - 20)
           ..isIt = true
           ..safety = 1.15
+          ..comboCount = 0
+          ..comboTimer = 0
           ..stamina = math.min(100, target.stamina + 16);
+        _pushApartAfterTag(tagger, target);
         noTagTimer = 0;
         catchupBoost = 1;
-        floatingTexts.add(
-          FloatingText(
-            position: target.position,
-            text: 'TAG!',
-            color: const Color(0xfffff4a8),
-            ttl: 0.75,
-          ),
+        if (bountyHit) {
+          _float(
+            target.position.translate(0, -36),
+            'BOUNTY +$bountyBonus',
+            const Color(0xffffd64c),
+            ttl: 0.98,
+          );
+          _startNewBounty();
+        }
+        _float(
+          target.position,
+          comboCount >= 2 ? 'x$comboCount COMBO!' : 'TAG!',
+          comboCount >= 2 ? const Color(0xffff8a18) : const Color(0xfffff4a8),
+          ttl: comboCount >= 2 ? 0.9 : 0.75,
         );
         break;
       }
@@ -589,17 +1104,140 @@ class PlaygroundBlitzSimulation {
     }
   }
 
+  void _blockTag(PlayerState tagger, PlayerState target) {
+    target
+      ..shieldTimer = 0
+      ..safety = 0.72
+      ..stamina = math.min(100, target.stamina + 12);
+    tagger
+      ..safety = 0.38
+      ..comboCount = 0
+      ..comboTimer = 0;
+    final direction = _separationDirection(tagger, target);
+    tagger
+      ..position -= direction * 38
+      ..velocity = -direction * 230;
+    target
+      ..position += direction * 18
+      ..velocity = direction * 95;
+    _clampPlayerToYard(tagger, yard);
+    _clampPlayerToYard(target, yard);
+    _float(target.position, 'BLOCK!', const Color(0xff9dff73), ttl: 0.88);
+  }
+
+  void _pushApartAfterTag(PlayerState tagger, PlayerState target) {
+    final direction = _separationDirection(tagger, target);
+    tagger
+      ..position -= direction * 24
+      ..velocity = -direction * 135;
+    target
+      ..position += direction * 34
+      ..velocity = direction * 165;
+    _clampPlayerToYard(tagger, yard);
+    _clampPlayerToYard(target, yard);
+  }
+
+  void _resolvePlayerSeparation(Rect activeYard) {
+    for (var pass = 0; pass < 2; pass += 1) {
+      for (var i = 0; i < players.length; i += 1) {
+        for (var j = i + 1; j < players.length; j += 1) {
+          final first = players[i];
+          final second = players[j];
+          final delta = second.position - first.position;
+          final distance = delta.distance;
+          if (distance >= playerSeparationRadius) {
+            continue;
+          }
+          final direction = distance < 0.001
+              ? _directionForPair(i, j)
+              : delta / distance;
+          final overlap = playerSeparationRadius - distance;
+          final firstShare = first.isHuman
+              ? 0.28
+              : second.isHuman
+              ? 0.72
+              : 0.5;
+          final secondShare = 1 - firstShare;
+
+          first.position -= direction * overlap * firstShare;
+          second.position += direction * overlap * secondShare;
+          first.velocity -= direction * overlap * 3.2 * firstShare;
+          second.velocity += direction * overlap * 3.2 * secondShare;
+          _clampPlayerToYard(first, activeYard);
+          _clampPlayerToYard(second, activeYard);
+        }
+      }
+    }
+  }
+
+  Offset _separationDirection(PlayerState first, PlayerState second) {
+    final delta = second.position - first.position;
+    if (delta.distance >= 0.001) {
+      return delta / delta.distance;
+    }
+    final firstIndex = players.indexOf(first);
+    final secondIndex = players.indexOf(second);
+    return _directionForPair(firstIndex, secondIndex);
+  }
+
+  Offset _directionForPair(int firstIndex, int secondIndex) {
+    final angle = firstIndex * 2.399963 + secondIndex * 1.714291;
+    return Offset(math.cos(angle), math.sin(angle));
+  }
+
+  void _clampPlayerToYard(PlayerState player, Rect activeYard) {
+    player.position = Offset(
+      player.position.dx.clamp(
+        activeYard.left + playerRadius,
+        activeYard.right - playerRadius,
+      ),
+      player.position.dy.clamp(
+        activeYard.top + playerRadius,
+        activeYard.bottom - playerRadius,
+      ),
+    );
+  }
+
   void _scoreObjectives(double dt) {
     for (final player in players) {
       if (!player.isIt) {
-        player.score += dt * 1.4;
+        player.score += dt * _survivalRate;
       }
 
-      if (bellZone.active &&
+      if (player.id == _bountyTargetId && _bountyTimeLeft > 0 && !player.isIt) {
+        player.score += dt * (frenzy ? 5.5 : 4.2);
+      }
+
+      if (bellMode &&
+          bellZone.active &&
           (player.position - bellZone.center).distance <= bellZone.radius) {
         player.score += dt * (player.isIt ? 8 : 13);
       }
+
+      if (shrinkingMode) {
+        final activeYard = yard;
+        final edgeMargin = [
+          player.position.dx - activeYard.left,
+          activeYard.right - player.position.dx,
+          player.position.dy - activeYard.top,
+          activeYard.bottom - player.position.dy,
+        ].reduce(math.min);
+        if (edgeMargin > 86) {
+          player.score += dt * (player.isIt ? 1.2 : 3.2);
+        } else if (edgeMargin < 34) {
+          player.stamina = math.max(0, player.stamina - 12 * dt);
+        }
+      }
     }
+  }
+
+  double get _survivalRate {
+    return switch (mode) {
+      BlitzMode.staminaChase => 1.8,
+      BlitzMode.bellZone => 0.8,
+      BlitzMode.shrinkingYard => 1.1,
+      BlitzMode.tagFrenzy => 0.35,
+    };
   }
 
   PlayerState _pickTagTarget(PlayerState player) {
@@ -622,7 +1260,7 @@ class PlaygroundBlitzSimulation {
         continue;
       }
       final distanceScore = (candidate.position - player.position).distance;
-      final bellRisk = bellZone.active
+      final bellRisk = bellMode && bellZone.active
           ? (candidate.position - bellZone.center).distance * 0.18
           : 0;
       final score = distanceScore + bellRisk - candidate.score * 0.03;
