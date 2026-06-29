@@ -1,0 +1,5 @@
+Internal testing update 1.0.1.
+
+- Adds the improved interactive tutorial flow.
+- Adds clearer gameplay objectives, score goals, bounty targets, power-ups, and mode rules.
+- Fixes tutorial visibility and progression issues on the vertical game board.
